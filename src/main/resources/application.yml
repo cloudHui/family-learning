@@ -1,0 +1,43 @@
+server:
+  address: ${APP_ADDRESS:127.0.0.1}
+  port: ${APP_PORT:8088}
+  servlet:
+    context-path: /${ACCESS_CODE:family-learning}
+  error:
+    include-message: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+    min-response-size: 1024
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:40}
+      min-spare: 2
+    max-connections: 200
+    accept-count: 50
+  forward-headers-strategy: native
+
+spring:
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  web:
+    resources:
+      cache:
+        period: 1h
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+
+family-learning:
+  data-dir: ${DATA_DIR:./data}
+  resource-dir: ${RESOURCE_DIR:./resources}
+  report:
+    cron: ${REPORT_CRON:0 55 23 * * *}
+    zone: ${REPORT_ZONE:Asia/Shanghai}
+    recipient: ${REPORT_RECIPIENT:}

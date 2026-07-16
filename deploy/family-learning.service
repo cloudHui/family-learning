@@ -1,0 +1,24 @@
+[Unit]
+Description=Family Learning Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=family-learning
+Group=family-learning
+WorkingDirectory=/opt/family-learning
+EnvironmentFile=/etc/family-learning/family-learning.env
+ExecStart=/usr/bin/java -Xms64m -Xmx256m -XX:+UseG1GC -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -jar /opt/family-learning/family-learning.jar
+Restart=on-failure
+RestartSec=5s
+SuccessExitStatus=143
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/family-learning /var/lib/family-learning/resources
+
+[Install]
+WantedBy=multi-user.target

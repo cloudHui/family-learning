@@ -1,0 +1,16 @@
+stream {
+    map $ssl_preread_server_name $family_learning_backend {
+        __DOMAIN__ web_https;
+        default xray_reality;
+    }
+    upstream web_https { server 127.0.0.1:8444; }
+    upstream xray_reality { server 127.0.0.1:8443; }
+    server {
+        listen 443;
+        listen [::]:443;
+        ssl_preread on;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+        proxy_pass $family_learning_backend;
+    }
+}

@@ -1,0 +1,12 @@
+.stats-grid.four{grid-template-columns:repeat(4,1fr)}
+.login-note{font-size:12px;color:var(--muted)}
+.modal{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgba(25,20,48,.55)}
+.modal-card{width:min(420px,100%);display:grid;gap:12px;padding:28px;border-radius:20px;background:#fff}
+.modal-card h2{margin:0 0 8px}.modal-card input,.math-options input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px}
+.stats-panels{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.stats-panels article,.content-cards article{padding:22px;border:1px solid var(--line);border-radius:18px;background:#fff}.stats-panels h2{margin-top:0}
+.trend-bars{height:150px;display:flex;align-items:end;gap:10px}.trend-bars>div{flex:1;display:grid;justify-items:center;gap:4px;font-size:11px}.trend-bars i{display:block;width:18px;max-height:110px;min-height:4px;border-radius:8px 8px 2px 2px;background:var(--primary)}
+.progress-line{height:10px;border-radius:10px;background:#ece9f5;overflow:hidden}.progress-line i{display:block;height:100%;background:var(--green)}
+.content-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:15px}.content-cards small{color:var(--muted)}
+.worksheet{max-width:900px;margin:auto;padding:45px;background:#fff;color:#111}.worksheet>h1{text-align:center}.worksheet-meta{text-align:center;margin-bottom:35px}.worksheet-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:26px 40px;font-size:18px}.worksheet-grid .wide{grid-column:1/-1;min-height:70px}.worksheet-grid small{display:block;margin:8px 0 0 22px;color:#555}.answer-sheet{page-break-before:always;margin-top:50px}.answer-sheet p{display:inline-block;width:24%}
+@media(max-width:700px){.stats-grid.four,.stats-panels,.content-cards{grid-template-columns:1fr 1fr}.worksheet-grid{grid-template-columns:1fr}.worksheet-grid .wide{grid-column:auto}}
+@media print{body,#app{background:#fff}.topbar,.no-print,.toast{display:none!important}.content{width:100%;padding:0}.page-section>:not(.worksheet){display:none}.worksheet{display:block!important;max-width:none;padding:10mm;box-shadow:none;border:0}.answer-sheet{display:block!important}.worksheet-grid{gap:22px 35px}}

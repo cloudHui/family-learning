@@ -1,0 +1,15 @@
+/target/
+/data/
+/resources/
+/config/
+/logs/
+/run/
+/.idea/
+/.vscode/
+*.iml
+*.log
+*.pid
+*.tmp
+.env
+*.local
+src/main/resources/application-local.yml

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#7357e8">
+  <title>成长小课堂</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/features.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <div v-if="toast" class="toast">{{ toast }}</div>
+
+    <main v-if="!student" class="welcome-page">
+      <section class="welcome-card">
+        <div class="brand-mark">学</div>
+        <p class="eyebrow">家庭学习工具</p>
+        <h1>欢迎来到成长小课堂</h1>
+        <p class="welcome-tip">输入用户名和密码，继续今天的学习</p>
+        <form @submit.prevent="enterStudent" class="name-form">
+          <input v-model.trim="nameInput" maxlength="20" autocomplete="username" placeholder="请输入用户名" aria-label="用户名">
+          <input v-model="passwordInput" type="password" maxlength="64" autocomplete="current-password" placeholder="密码（新用户默认123456）" aria-label="密码">
+          <button class="primary big" :disabled="loading">{{ loading ? '正在进入…' : '登录 / 首次进入' }}</button>
+        </form>
+        <p class="login-note">新用户名使用默认密码 123456 会自动创建账号</p>
+        <p v-if="error" class="error-text">{{ error }}</p>
+      </section>
+    </main>
+
+    <div v-else class="shell">
+      <header class="topbar">
+        <button v-if="view !== 'home'" class="icon-button" @click="goHome" aria-label="返回首页">←</button>
+        <div class="brand-small" @click="goHome"><span>学</span><b>成长小课堂</b></div>
+        <div class="student-menu">
+          <span class="avatar">{{ student.name.slice(0, 1) }}</span>
+          <b>{{ student.name }}</b>
+          <button v-if="student.role==='ADMIN'" @click="openAdmin">管理后台</button>
+          <button @click="showPassword=true">修改密码</button>
+          <button @click="leaveStudent">切换</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section v-if="view === 'home'">
+          <div class="hero">
+            <div><p class="eyebrow">{{ greeting }}</p><h1>{{ student.name }}，今天想学什么？</h1><p>每天进步一点点，就是很棒的成长。</p></div>
+            <div class="hero-star">★</div>
+          </div>
+
+          <div class="stats-grid four">
+            <div><span>今日完成量</span><strong>{{ dashboard.completed || 0 }}</strong><small>题 / 字</small></div>
+            <div><span>今日正确率</span><strong>{{ dashboard.accuracy || 0 }}%</strong><small>继续加油</small></div>
+            <div><span>待复习错题</span><strong>{{ dashboard.pendingMistakes || 0 }}</strong><small>条</small></div>
+            <div><span>连续学习</span><strong>{{ dashboard.streakDays || 0 }}</strong><small>天</small></div>
+          </div>
+
+          <h2 class="section-title">学习天地</h2>
+          <div class="subject-grid">
+            <button v-if="hasPerm('CHINESE')" class="subject chinese" @click="openView('chinese')"><i>语</i><span><b>语文区</b><small>识字 · 听写 · 手写</small></span></button>
+            <button v-if="hasPerm('MATH')" class="subject math" @click="openView('math')"><i>数</i><span><b>数学区</b><small>加减法 · 文字题</small></span></button>
+            <button v-if="hasPerm('ENGLISH')" class="subject english" @click="openSubject('英语')"><i>英</i><span><b>英语区</b><small>字母 · 单词 · 听力</small></span></button>
+            <button v-if="hasPerm('PRIMARY')" class="subject primary-school" @click="openView('stages')"><i>小</i><span><b>小学区</b><small>幼小衔接至六年级</small></span></button>
+            <button v-if="hasPerm('HISTORY')" class="subject history" @click="openSubject('历史')"><i>史</i><span><b>历史区</b><small>人物 · 故事 · 时间线</small></span></button>
+            <button v-if="hasPerm('CHEMISTRY')" class="subject chemistry" @click="openSubject('化学')"><i>化</i><span><b>化学区</b><small>知识卡片 · 小测验</small></span></button>
+          </div>
+
+          <h2 class="section-title">学习管理</h2>
+          <div class="tool-grid">
+            <button v-if="hasPerm('MISTAKES')" @click="openView('mistakes')"><span>📝</span><b>错题复习</b><small>{{ dashboard.pendingMistakes || 0 }} 条待复习</small></button>
+            <button v-if="hasPerm('STATS')" @click="openView('stats')"><span>📈</span><b>学习统计</b><small>趋势与掌握情况</small></button>
+            <button v-if="hasPerm('RECORDS')" @click="openView('records')"><span>📊</span><b>学习记录</b><small>查看成长足迹</small></button>
+            <button v-if="hasPerm('PRINT')" @click="openView('print')"><span>🖨️</span><b>题目打印</b><small>随机算术与文字题</small></button>
+            <button v-if="hasPerm('RESOURCES')" @click="openView('resources')"><span>📚</span><b>资源中心</b><small>绘本、古诗和练习</small></button>
+          </div>
+        </section>
+
+        <section v-else-if="view === 'chinese'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">语文区</p><h1>识字小课堂</h1></div><div class="segmented"><button :class="{active: chineseMode==='learn'}" @click="setChineseMode('learn')">认字</button><button :class="{active: chineseMode==='dictation'}" @click="setChineseMode('dictation')">听写</button></div></div>
+
+          <div v-if="chineseMode === 'learn'" class="learning-layout">
+            <aside class="word-list">
+              <button v-for="(word,index) in words" :key="word.id" :class="{active:selectedWord && selectedWord.id===word.id}" @click="selectWord(word)"><span>{{ word.character }}</span><small>{{ word.pinyin }}</small></button>
+            </aside>
+            <div v-if="selectedWord" class="word-workspace">
+              <article class="word-card">
+                <button class="sound-button" @click="speak(selectedWord.character)">🔊 听读音</button>
+                <div class="big-character">{{ selectedWord.character }}</div>
+                <h2>{{ selectedWord.pinyin }}</h2>
+                <p><b>组词：</b>{{ selectedWord.words }}</p>
+                <p><b>例句：</b>{{ selectedWord.sentence }}</p>
+                <p class="meaning">{{ selectedWord.meaning }}</p>
+              </article>
+              <article class="writing-card">
+                <div class="card-title"><div><h3>写一写</h3><small>用手指或鼠标在田字格中书写</small></div><button @click="clearCanvas">清除</button></div>
+                <div class="canvas-wrap"><canvas ref="writingCanvas" width="520" height="520"></canvas><span v-if="showGuide" class="guide-char">{{ selectedWord.character }}</span></div>
+                <label class="guide-toggle"><input type="checkbox" v-model="showGuide"> 显示描红参考</label>
+                <div class="answer-actions"><button class="success" @click="recordWord(true)">我认识</button><button class="warning" @click="recordWord(false)">还要复习</button></div>
+              </article>
+            </div>
+          </div>
+
+          <div v-else class="dictation-card">
+            <div v-if="!dictationWord" class="empty-state"><span>🎧</span><h2>准备好听写了吗？</h2><p>系统会读出一个汉字，请在田字格中写下来。</p><button class="primary big" @click="startDictation">开始听写</button></div>
+            <template v-else>
+              <div class="dictation-top"><span>听一听，写一写</span><button class="sound-button" @click="speak(dictationWord.character)">🔊 再听一次</button></div>
+              <div class="canvas-wrap dictation"><canvas ref="writingCanvas" width="520" height="520"></canvas></div>
+              <div v-if="dictationRevealed" class="dictation-answer">正确答案：<b>{{ dictationWord.character }}</b> <span>{{ dictationWord.pinyin }}</span></div>
+              <div class="answer-actions" v-if="!dictationRevealed"><button @click="clearCanvas">清除</button><button class="primary" @click="dictationRevealed=true">查看答案</button></div>
+              <div class="answer-actions" v-else><button class="success" @click="finishDictation(true)">写对了</button><button class="warning" @click="finishDictation(false)">写错了</button></div>
+            </template>
+          </div>
+        </section>
+
+        <section v-else-if="view === 'math'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">数学区</p><h1>算术练习</h1></div></div>
+          <div v-if="!mathQuestions.length || mathFinished" class="setup-card">
+            <span class="setup-icon">🧮</span><h2>{{ mathFinished ? '练习完成！' : '选择今天的练习' }}</h2>
+            <div v-if="mathFinished" class="result-circle"><strong>{{ mathCorrect }}</strong><small>/ {{ mathQuestions.length }} 题正确</small></div>
+            <div class="math-options">
+              <label>数字范围<select v-model.number="mathConfig.max"><option :value="10">10以内</option><option :value="20">20以内</option><option :value="50">50以内</option><option :value="100">100以内</option></select></label>
+              <label>题目类型<select v-model="mathConfig.operation"><option value="mixed">加减混合</option><option value="add">只练加法</option><option value="sub">只练减法</option></select></label>
+              <label>题目数量<select v-model.number="mathConfig.count"><option :value="5">5题</option><option :value="10">10题</option><option :value="20">20题</option></select></label>
+            </div>
+            <button class="primary big" @click="startMath">{{ mathFinished ? '再练一次' : '开始答题' }}</button>
+          </div>
+          <div v-else class="quiz-card">
+            <div class="quiz-progress"><span>第 {{ mathIndex + 1 }} / {{ mathQuestions.length }} 题</span><div><i :style="{width: ((mathIndex+1)/mathQuestions.length*100)+'%'}"></i></div><b>答对 {{ mathCorrect }} 题</b></div>
+            <div class="math-question">{{ currentMath.left }} <em>{{ currentMath.operator }}</em> {{ currentMath.right }} <em>=</em></div>
+            <form @submit.prevent="submitMath" class="math-answer"><input ref="mathInput" v-model="mathAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="?" aria-label="答案"><button class="primary">确定</button></form>
+            <p v-if="mathFeedback" :class="['feedback', mathFeedback.correct?'right':'wrong']">{{ mathFeedback.text }}</p>
+          </div>
+        </section>
+
+        <section v-else-if="view === 'mistakes'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">学习管理</p><h1>分科错题库</h1></div><select v-model="mistakeSubject" @change="loadMistakes"><option value="">全部科目</option><option>语文</option><option>数学</option><option>英语</option><option>历史</option><option>化学</option></select></div>
+          <div v-if="!mistakeList.length" class="empty-state card"><span>🎉</span><h2>暂时没有错题</h2><p>认真学习的你真棒！</p></div>
+          <div v-else class="mistake-list">
+            <article v-for="item in mistakeList" :key="item.id">
+              <div class="mistake-meta"><span>{{ item.subject }} · {{ item.module }}</span><b :class="statusClass(item.status)">{{ item.status }}</b></div>
+              <h3>{{ item.question }}</h3><p>你的答案：<s>{{ item.userAnswer || '未作答' }}</s></p><p>正确答案：<strong>{{ item.correctAnswer }}</strong></p>
+              <small>错误 {{ item.errorCount }} 次 · 已复习 {{ item.reviewCount }} 次 · 连续答对 {{ item.consecutiveCorrect }} 次</small>
+              <div class="answer-actions"><button class="warning" @click="reviewMistake(item,false)">这次还不会</button><button class="success" @click="reviewMistake(item,true)">这次答对了</button></div>
+            </article>
+          </div>
+        </section>
+
+        <section v-else-if="view === 'records'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">学习管理</p><h1>学习记录</h1></div></div>
+          <div v-if="!recordList.length" class="empty-state card"><span>📊</span><h2>还没有学习记录</h2><p>完成一次识字或算术练习后，这里会留下成长足迹。</p></div>
+          <div v-else class="record-list"><article v-for="item in recordList" :key="item.id"><time>{{ formatDate(item.createdAt) }}</time><span class="record-icon">{{ item.subject==='数学'?'🧮':'📖' }}</span><div><h3>{{ item.subject }} · {{ item.module }}</h3><p>{{ item.stage }} · 完成 {{ item.total }} 项 · 正确 {{ item.correct }} 项</p></div><b v-if="item.total">{{ Math.round(item.correct/item.total*100) }}%</b></article></div>
+        </section>
+
+        <section v-else-if="view === 'stats'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">个人数据</p><h1>学习统计</h1></div><button @click="loadStats">刷新</button></div>
+          <div class="stats-grid four">
+            <div><span>今日学习</span><strong>{{ formatDuration(statsData.today?.studySeconds||0) }}</strong><small>{{ statsData.today?.sessions||0 }} 次练习</small></div>
+            <div><span>今日完成</span><strong>{{ statsData.today?.completed||0 }}</strong><small>题 / 字</small></div>
+            <div><span>今日正确率</span><strong>{{ statsData.today?.accuracy||0 }}%</strong><small>新增错题 {{ statsData.today?.newMistakes||0 }}</small></div>
+            <div><span>连续学习</span><strong>{{ statsData.habits?.streakDays||0 }}</strong><small>天</small></div>
+          </div>
+          <div class="stats-panels">
+            <article><h2>最近7天趋势</h2><div class="trend-bars"><div v-for="day in statsData.trends7||[]"><span>{{ day.date.slice(5) }}</span><i :style="{height: Math.max(4,day.completed*4)+'px'}"></i><b>{{ day.completed }}</b></div></div></article>
+            <article><h2>语文统计</h2><p>已学汉字 <b>{{ statsData.chinese?.learned||0 }}</b> 个</p><p>认识 {{ statsData.chinese?.known||0 }} · 模糊 {{ statsData.chinese?.fuzzy||0 }} · 未学 {{ statsData.chinese?.unknown||0 }}</p><p>听写正确率 {{ statsData.chinese?.dictationAccuracy||0 }}%</p></article>
+            <article><h2>数学统计</h2><p>累计完成 <b>{{ statsData.math?.total||0 }}</b> 题</p><p>正确率 {{ statsData.math?.accuracy||0 }}%</p><p>平均每题 {{ statsData.math?.averageSeconds||0 }} 秒</p></article>
+            <article><h2>错题状态</h2><p v-for="(count,status) in statsData.mistakes?.status||{}"><span>{{ status }}</span> <b>{{ count }}</b></p></article>
+            <article><h2>学科分布</h2><p v-for="item in statsData.subjects||[]">{{ item.subject }}：{{ item.sessions }} 次，正确率 {{ item.accuracy }}%</p></article>
+            <article><h2>阶段进度</h2><p>{{ statsData.stageProgress?.stage }}</p><div class="progress-line"><i :style="{width:(statsData.stageProgress?.percent||0)+'%'}"></i></div><p>{{ statsData.stageProgress?.completed||0 }} / {{ statsData.stageProgress?.total||0 }}（{{ statsData.stageProgress?.percent||0 }}%）</p></article>
+          </div>
+        </section>
+
+        <section v-else-if="view === 'print'" class="page-section print-page">
+          <div class="page-heading no-print"><div><p class="eyebrow">练习生成</p><h1>随机题目打印</h1></div><div class="answer-actions"><button @click="generatePrintable">重新生成</button><button class="primary" :disabled="!printQuestions.length" @click="printWorksheet">打印 / 保存PDF</button></div></div>
+          <div class="math-options no-print">
+            <label>范围<select v-model.number="printConfig.max"><option :value="10">10以内</option><option :value="20">20以内</option><option :value="50">50以内</option><option :value="100">100以内</option></select></label>
+            <label>算术题数量<input type="number" min="0" max="100" v-model.number="printConfig.count"></label>
+            <label>文字题数量<input type="number" min="0" max="50" v-model.number="printConfig.wordProblems"></label>
+            <label>答案<select v-model="printConfig.showAnswers"><option :value="false">单独答案页</option><option :value="true">题目下显示</option></select></label>
+          </div>
+          <article class="worksheet" v-if="printQuestions.length"><h1>成长小课堂练习题</h1><p class="worksheet-meta">姓名：____________　日期：____________　得分：____________</p><div class="worksheet-grid"><div v-for="(item,index) in printQuestions" :class="{wide:item.type==='文字题'}"><b>{{ index+1 }}.</b> {{ item.text }}<small v-if="printConfig.showAnswers">答案：{{ item.answer }}</small></div></div><section v-if="!printConfig.showAnswers" class="answer-sheet"><h2>参考答案</h2><p v-for="(item,index) in printQuestions">{{ index+1 }}. {{ item.answer }}</p></section></article>
+        </section>
+
+        <section v-else-if="view === 'subject'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">{{ subjectName }}区</p><h1>{{ subjectName }}学习内容</h1></div></div>
+          <div v-if="!subjectItems.length" class="empty-state card"><span>📚</span><h2>内容正在准备</h2><p>管理员添加内容后会显示在这里。</p></div>
+          <div class="content-cards"><template v-for="item in subjectItems"><article v-if="item.enabled"><small>{{ item.stage }} · {{ item.type }}</small><h2>{{ item.title }}</h2><p>{{ item.body }}</p><details v-if="item.answer"><summary>查看答案</summary>{{ item.answer }}</details></article></template></div>
+        </section>
+
+        <section v-else-if="view === 'resources'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>我的学习资料</h1></div><button @click="loadResources">刷新</button></div>
+          <div class="resource-folders"><button v-for="folder in resourceFolders" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()"><span>{{ folder.icon }}</span>{{ folder.name }}</button></div>
+          <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有资料</h2><p>把 PDF、图片、文本或音频放进对应资源目录后即可显示。</p></div>
+          <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="openResource(item.path)">打开</button></article></div>
+        </section>
+
+        <section v-else-if="view === 'stages'" class="page-section">
+          <div class="page-heading"><div><p class="eyebrow">小学区</p><h1>选择学习阶段</h1></div></div>
+          <div class="stage-grid"><button v-for="(stage,index) in stages" @click="chooseStage(stage)"><i>{{ index }}</i><b>{{ stage }}</b><small>{{ index===0?'打好入学基础':'同步阶段学习' }}</small></button></div>
+        </section>
+
+        <section v-else-if="view === 'placeholder'" class="page-section">
+          <div class="empty-state card large"><span>🚧</span><h1>{{ placeholderTitle }}正在准备中</h1><p>入口和学习记录结构已经预留，下一批内容会逐步加入。</p><button class="primary" @click="goHome">返回首页</button></div>
+        </section>
+      </main>
+    </div>
+    <div v-if="showPassword" class="modal"><form class="modal-card" @submit.prevent="changePassword"><h2>{{student&&student.mustChangePassword?'首次登录，请设置新密码':'修改密码'}}</h2><p v-if="student&&student.mustChangePassword">修改成功后才能进入学习页面，下次请使用新密码登录。</p><input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" placeholder="原密码" required><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="6" placeholder="新密码（至少6位）" required><input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" required><div class="answer-actions"><button v-if="student&&student.mustChangePassword" type="button" @click="leaveStudent">退出登录</button><button v-else type="button" @click="showPassword=false">取消</button><button class="primary">保存</button></div></form></div>
+  </div>
+  <script src="js/vue.global.prod.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

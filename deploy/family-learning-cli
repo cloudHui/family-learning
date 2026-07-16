@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+SERVICE=family-learning.service
+INSTALLER=/opt/family-learning/source/install.sh
+
+need_root() { [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"; }
+
+case "${1:-menu}" in
+  start|stop|restart) need_root "$@"; systemctl "$1" "$SERVICE" ;;
+  status) systemctl --no-pager --full status "$SERVICE" ;;
+  logs) journalctl -u "$SERVICE" -n "${2:-100}" --no-pager ;;
+  update) need_root "$@"; [ -x "$INSTALLER" ] || { echo "找不到安装脚本" >&2; exit 1; }; exec "$INSTALLER" update ;;
+  menu)
+    echo "1. 启动  2. 停止  3. 重启  4. 状态  5. 日志  6. 更新"
+    printf "请选择: "; read -r choice
+    case "$choice" in
+      1) exec "$0" start ;; 2) exec "$0" stop ;; 3) exec "$0" restart ;;
+      4) exec "$0" status ;; 5) exec "$0" logs ;; 6) exec "$0" update ;;
+      *) echo "无效选项" >&2; exit 1 ;;
+    esac ;;
+  *) echo "用法: family-learning {start|stop|restart|status|logs [行数]|update}" >&2; exit 1 ;;
+esac
