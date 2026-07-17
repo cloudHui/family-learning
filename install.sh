@@ -56,6 +56,12 @@ load_or_prompt_config() {
     PUBLIC_IP=$(sed -n 's/^PUBLIC_IP=//p' "$ENV_FILE" | tail -1)
     DOMAIN=$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" | tail -1)
     ENABLE_HTTPS=$(sed -n 's/^ENABLE_HTTPS=//p' "$ENV_FILE" | tail -1)
+    MAIL_HOST=$(sed -n 's/^MAIL_HOST=//p' "$ENV_FILE" | tail -1)
+    MAIL_PORT=$(sed -n 's/^MAIL_PORT=//p' "$ENV_FILE" | tail -1)
+    MAIL_USERNAME=$(sed -n 's/^MAIL_USERNAME=//p' "$ENV_FILE" | tail -1)
+    MAIL_PASSWORD=$(sed -n 's/^MAIL_PASSWORD=//p' "$ENV_FILE" | tail -1)
+    REPORT_RECIPIENT=$(sed -n 's/^REPORT_RECIPIENT=//p' "$ENV_FILE" | tail -1)
+    CERT_EMAIL=$(sed -n 's/^CERT_EMAIL=//p' "$ENV_FILE" | tail -1)
     ACCESS_CODE=${ACCESS_CODE#/}
     return
   fi
@@ -93,8 +99,9 @@ ENABLE_HTTPS=$ENABLE_HTTPS
 MAIL_HOST=${MAIL_HOST:-}
 MAIL_PORT=${MAIL_PORT:-465}
 MAIL_USERNAME=${MAIL_USERNAME:-}
-MAIL_PASSWORD=${MAIL_PASSWORD:-}
-REPORT_RECIPIENT=${REPORT_RECIPIENT:-}
+    MAIL_PASSWORD=${MAIL_PASSWORD:-}
+    REPORT_RECIPIENT=${REPORT_RECIPIENT:-}
+CERT_EMAIL=${CERT_EMAIL:-}
 EOF
   chmod 600 "$ENV_FILE"
 }
@@ -223,6 +230,12 @@ enable_https() {
   [ -n "${CERT_EMAIL:-}" ] || { ask "证书通知邮箱" ""; CERT_EMAIL=$ANSWER; }
   [ -n "$CERT_EMAIL" ] || die "申请证书需要邮箱"
   certbot certonly --webroot -w /var/www/family-learning-acme -d "$DOMAIN" --email "$CERT_EMAIL" --agree-tos --non-interactive
+  install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+  cat >/etc/letsencrypt/renewal-hooks/deploy/family-learning-nginx-reload <<'EOF'
+#!/bin/sh
+systemctl reload nginx
+EOF
+  chmod 755 /etc/letsencrypt/renewal-hooks/deploy/family-learning-nginx-reload
   cat >>"$NGINX_CONF" <<EOF
 
 server {
