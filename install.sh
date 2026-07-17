@@ -6,6 +6,7 @@ APP_DIR=/opt/family-learning
 SOURCE_DIR=$APP_DIR/source
 DATA_DIR=/var/lib/family-learning
 RESOURCE_DIR=$DATA_DIR/resources
+DATASET_DIR=$DATA_DIR/datasets
 CONFIG_DIR=/etc/family-learning
 ENV_FILE=$CONFIG_DIR/family-learning.env
 SERVICE=family-learning.service
@@ -75,13 +76,14 @@ load_or_prompt_config() {
 }
 
 write_env() {
-  install -d -m 750 "$CONFIG_DIR" "$DATA_DIR" "$RESOURCE_DIR"
+  install -d -m 750 "$CONFIG_DIR" "$DATA_DIR" "$RESOURCE_DIR" "$DATASET_DIR"
   cat >"$ENV_FILE" <<EOF
 APP_ADDRESS=127.0.0.1
 APP_PORT=8088
 ACCESS_CODE=$ACCESS_CODE
 DATA_DIR=$DATA_DIR
 RESOURCE_DIR=$RESOURCE_DIR
+DATASET_DIR=$DATASET_DIR
 TOMCAT_MAX_THREADS=40
 REPORT_ZONE=Asia/Shanghai
 REPORT_CRON='0 55 23 * * *'
@@ -113,10 +115,45 @@ build_jar() {
   (cd "$SOURCE_DIR" && MAVEN_OPTS='-Xms64m -Xmx384m' mvn --batch-mode test package)
 }
 
+install_datasets() {
+  install -d -m 750 "$DATASET_DIR" "$RESOURCE_DIR/english/kids"
+  if [ -f "$SOURCE_DIR/datasets/characters.tar.gz" ]; then
+    rm -rf "$DATASET_DIR/characters"
+    tar -xzf "$SOURCE_DIR/datasets/characters.tar.gz" -C "$DATASET_DIR"
+  fi
+  if [ -f "$SOURCE_DIR/datasets/dictionary.tar.gz" ]; then
+    rm -rf "$DATASET_DIR/dictionary"
+    tar -xzf "$SOURCE_DIR/datasets/dictionary.tar.gz" -C "$DATASET_DIR"
+  fi
+  if [ -f "$SOURCE_DIR/datasets/poetry.jsonl.gz" ]; then
+    gzip -dc "$SOURCE_DIR/datasets/poetry.jsonl.gz" >"$DATASET_DIR/poetry.jsonl"
+  fi
+  # 诗词分片索引：有打包则解压，否则现场生成
+  if [ -f "$SOURCE_DIR/datasets/poetry-idx.tar.gz" ]; then
+    rm -rf "$DATASET_DIR/poetry-idx" "$DATASET_DIR/poetry.idx"
+    tar -xzf "$SOURCE_DIR/datasets/poetry-idx.tar.gz" -C "$DATASET_DIR"
+  elif [ -f "$DATASET_DIR/poetry.jsonl" ] && [ -f "$SOURCE_DIR/scripts/import-datasets.py" ]; then
+    python3 "$SOURCE_DIR/scripts/import-datasets.py" poetry-index "$DATASET_DIR/poetry.jsonl"
+  fi
+  if [ -f "$SOURCE_DIR/datasets/textbooks.json" ]; then
+    install -m 644 "$SOURCE_DIR/datasets/textbooks.json" "$DATASET_DIR/textbooks.json"
+  fi
+  if [ -f "$SOURCE_DIR/datasets/english-kids.tar.gz" ]; then
+    rm -rf "$RESOURCE_DIR/english/kids"
+    install -d -m 750 "$RESOURCE_DIR/english"
+    tar -xzf "$SOURCE_DIR/datasets/english-kids.tar.gz" -C "$RESOURCE_DIR/english"
+    if [ -d "$RESOURCE_DIR/english/english-kids" ]; then
+      mv "$RESOURCE_DIR/english/english-kids" "$RESOURCE_DIR/english/kids"
+    fi
+  fi
+  chown -R family-learning:family-learning "$DATA_DIR"
+}
+
 install_service() {
   if ! id family-learning >/dev/null 2>&1; then
     useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin family-learning
   fi
+  install_datasets
   chown -R family-learning:family-learning "$DATA_DIR"
   if [ -f "$APP_DIR/family-learning.jar" ]; then
     cp -f "$APP_DIR/family-learning.jar" "$APP_DIR/family-learning.jar.previous"
@@ -160,8 +197,9 @@ EOF
 
 configure_firewall() {
   if has ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+    ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
   elif has firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port=22/tcp >/dev/null
     firewall-cmd --permanent --add-service=http >/dev/null
     firewall-cmd --permanent --add-service=https >/dev/null
     firewall-cmd --reload >/dev/null

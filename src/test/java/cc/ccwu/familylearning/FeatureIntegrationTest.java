@@ -26,6 +26,7 @@ class FeatureIntegrationTest {
     @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {
         registry.add("family-learning.data-dir", () -> ROOT.resolve("data").toString());
         registry.add("family-learning.resource-dir", () -> ROOT.resolve("resources").toString());
+        registry.add("family-learning.dataset-dir", () -> ROOT.resolve("datasets").toString());
         registry.add("family-learning.report.recipient", () -> "");
     }
     @Autowired MockMvc mvc;
@@ -46,10 +47,17 @@ class FeatureIntegrationTest {
         mvc.perform(get("/api/auth/me").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.username").value("testkid"));
         mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.message").value("请先修改初始密码"));
         changePassword(token,"123456","kidpass");
+        Files.write(ROOT.resolve("datasets/textbooks.json"), "[{\"path\":\"小学/数学.pdf\",\"url\":\"https://github.com/example\"}]".getBytes("UTF-8"));
+        Files.write(ROOT.resolve("datasets/dictionary/te.jsonl"), "{\"word\":\"test\",\"translation\":\"测试\"}\n".getBytes("UTF-8"));
+        Files.write(ROOT.resolve("datasets/characters/5b66.json"), "{\"character\":\"学\",\"pinyin\":\"xué\"}".getBytes("UTF-8"));
         mvc.perform(get("/api/admin/users").header("X-Session-Token", token)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$[0].character").exists());
         mvc.perform(get("/api/math/questions?max=10&count=5").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5));
         mvc.perform(get("/api/math/printable?max=10&count=5&wordProblems=2&stage=幼小衔接").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(7));
+        mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].translation").value("测试"));
+        mvc.perform(get("/api/library/character?value=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.pinyin").value("xué"));
+        mvc.perform(get("/api/library/textbooks?query=数学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].path").value("小学/数学.pdf"));
+        mvc.perform(get("/api/library/poetry?query=月").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
 
         String record = "{\"subject\":\"数学\",\"module\":\"10以内算术\",\"stage\":\"幼小衔接\",\"total\":5,\"correct\":4,\"durationSeconds\":30}";
         JsonNode recordNode = json(mvc.perform(post("/api/records").header("X-Session-Token",token).contentType("application/json").content(record)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());

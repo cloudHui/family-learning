@@ -50,6 +50,8 @@ sudo family-learning update
 sudo /opt/family-learning/source/install.sh uninstall
 ```
 
+`update` 会用 GitHub `main` 覆盖服务器上的程序源码和部署文件，重新测试构建；`/etc/family-learning/family-learning.env`、证书和学习数据保留不变。
+
 更新前会运行测试并保留上一版 JAR，健康检查失败自动回滚。卸载默认保留学习数据。
 
 ## 数据与配置
@@ -57,6 +59,7 @@ sudo /opt/family-learning/source/install.sh uninstall
 - `/etc/family-learning/family-learning.env`：端口、路径和可选邮件配置
 - `/var/lib/family-learning/`：JSON 学习数据
 - `/var/lib/family-learning/resources/`：学习资源
+- `/var/lib/family-learning/datasets/`：汉字、词典、诗词索引及教材链接缓存
 - `/opt/family-learning/`：程序和源码
 
 学习系统不依赖数据库。JSON 采用临时文件与原子替换写入；默认不执行自动备份。

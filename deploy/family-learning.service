@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/family-learning /var/lib/family-learning/resources
+ReadWritePaths=/var/lib/family-learning /var/lib/family-learning/resources /var/lib/family-learning/datasets
 
 [Install]
 WantedBy=multi-user.target

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css">
-  <link rel="stylesheet" href="css/features.css">
+  <link rel="stylesheet" href="css/app.css?v=20260717-4">
+  <link rel="stylesheet" href="css/features.css?v=20260717-4">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -71,7 +71,7 @@
             <button v-if="hasPerm('STATS')" @click="openView('stats')"><span>📈</span><b>学习统计</b><small>趋势与掌握情况</small></button>
             <button v-if="hasPerm('RECORDS')" @click="openView('records')"><span>📊</span><b>学习记录</b><small>查看成长足迹</small></button>
             <button v-if="hasPerm('PRINT')" @click="openView('print')"><span>🖨️</span><b>题目打印</b><small>随机算术与文字题</small></button>
-            <button v-if="hasPerm('RESOURCES')" @click="openView('resources')"><span>📚</span><b>资源中心</b><small>绘本、古诗和练习</small></button>
+            <button v-if="hasPerm('RESOURCES')" @click="openView('resources')"><span>📚</span><b>资源中心</b><small>教材 · 汉字 · 词典 · 诗词</small></button>
           </div>
         </section>
 
@@ -187,10 +187,35 @@
         </section>
 
         <section v-else-if="view === 'resources'" class="page-section">
-          <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>我的学习资料</h1></div><button @click="loadResources">刷新</button></div>
-          <div class="resource-folders"><button v-for="folder in resourceFolders" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()"><span>{{ folder.icon }}</span>{{ folder.name }}</button></div>
-          <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有资料</h2><p>把 PDF、图片、文本或音频放进对应资源目录后即可显示。</p></div>
-          <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="openResource(item.path)">打开</button></article></div>
+          <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>开放学习库</h1><p class="muted">查本地资料库；下方才是家庭上传的文件。</p></div></div>
+          <article class="card library-search">
+            <div class="library-types">
+              <button v-for="item in libraryTypes" :key="item.id" :class="{active:libraryType===item.id}" @click="selectLibraryType(item.id)">
+                <span>{{ item.icon }}</span>{{ item.name }}
+              </button>
+            </div>
+            <div class="library-query" v-if="libraryType!=='english'">
+              <input v-model.trim="libraryQuery" @keyup.enter="searchLibrary" :placeholder="libraryPlaceholder">
+              <button class="primary" :disabled="libraryLoading" @click="searchLibrary">{{ libraryLoading?'查询中…':'查询' }}</button>
+            </div>
+            <p class="muted">{{ libraryHint }}</p>
+            <p v-if="libraryLoading" class="library-status">正在查询本地数据，请稍候…</p>
+            <div class="resource-list" v-else-if="libraryItems.length">
+              <article v-for="item in libraryItems" :key="item.url||item.path||item.word||item.character||item.title">
+                <span>{{ libraryIcon }}</span>
+                <div><h3>{{ libraryTitle(item) }}</h3><small>{{ libraryText(item) }}</small></div>
+                <button v-if="item.url" @click="openLibrary(item)">打开地址</button>
+                <button v-else-if="item.path" @click="openResource(item.path)">打开</button>
+              </article>
+            </div>
+            <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+          </article>
+          <div class="upload-block">
+            <div class="page-heading compact"><div><p class="eyebrow">本地上传</p><h2>家庭资料夹</h2><p class="muted">仅显示已上传的 PDF / 图片 / 音频，不含诗词库。</p></div><button @click="loadResources">刷新</button></div>
+            <div class="resource-folders"><button v-for="folder in resourceFolders" :key="folder.id" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()"><span>{{ folder.icon }}</span>{{ folder.name }}</button></div>
+            <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有上传文件</h2><p>管理员上传后会出现在这里。</p></div>
+            <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="openResource(item.path)">打开</button></article></div>
+          </div>
         </section>
 
         <section v-else-if="view === 'stages'" class="page-section">
@@ -205,7 +230,7 @@
     </div>
     <div v-if="showPassword" class="modal"><form class="modal-card" @submit.prevent="changePassword"><h2>{{student&&student.mustChangePassword?'首次登录，请设置新密码':'修改密码'}}</h2><p v-if="student&&student.mustChangePassword">修改成功后才能进入学习页面，下次请使用新密码登录。</p><input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" placeholder="原密码" required><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="6" placeholder="新密码（至少6位）" required><input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" required><div class="answer-actions"><button v-if="student&&student.mustChangePassword" type="button" @click="leaveStudent">退出登录</button><button v-else type="button" @click="showPassword=false">取消</button><button class="primary">保存</button></div></form></div>
   </div>
-  <script src="js/vue.global.prod.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/vue.global.prod.js?v=20260717-4"></script>
+  <script src="js/app.js?v=20260717-4"></script>
 </body>
 </html>

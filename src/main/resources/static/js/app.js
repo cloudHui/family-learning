@@ -9,16 +9,40 @@ createApp({
       selectedStage:'幼小衔接',stages:['幼小衔接','一年级','二年级','三年级','四年级','五年级','六年级'],
       chineseMode:'learn',words:[],selectedWord:null,showGuide:true,dictationWord:null,dictationRevealed:false,canvasDrawing:false,canvasLast:null,
       mathConfig:{max:10,count:10,operation:'mixed'},mathQuestions:[],mathIndex:0,mathAnswer:'',mathCorrect:0,mathFeedback:null,mathLocked:false,mathStartedAt:null,mathFinished:false,
-      mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'',
+      mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'english',
+      libraryType:'textbooks',libraryQuery:'',libraryItems:[],libraryLoading:false,libraryTip:'',
       printConfig:{max:10,count:20,wordProblems:5,operation:'mixed',showAnswers:false},printQuestions:[],
       subjectName:'',subjectItems:[],
-      resourceFolders:[{id:'',name:'全部',icon:'🗂️'},{id:'chinese',name:'语文',icon:'📕'},{id:'math',name:'数学',icon:'📘'},{id:'english',name:'英语',icon:'📗'},{id:'history',name:'历史',icon:'📙'},{id:'chemistry',name:'化学',icon:'🧪'},{id:'picture-books',name:'绘本',icon:'🖼️'},{id:'poems',name:'古诗',icon:'📜'},{id:'worksheets',name:'练习题',icon:'✏️'}]
+      libraryTypes:[
+        {id:'textbooks',name:'教材目录',icon:'📚'},
+        {id:'character',name:'汉字笔顺',icon:'✍️'},
+        {id:'dictionary',name:'英汉词典',icon:'🔤'},
+        {id:'poetry',name:'古诗词',icon:'📜'},
+        {id:'english',name:'英语听说',icon:'🎧'}
+      ],
+      resourceFolders:[
+        {id:'english',name:'英语文件',icon:'📗'},
+        {id:'chinese',name:'语文文件',icon:'📕'},
+        {id:'math',name:'数学文件',icon:'📘'},
+        {id:'history',name:'历史文件',icon:'📙'},
+        {id:'chemistry',name:'化学文件',icon:'🧪'},
+        {id:'picture-books',name:'绘本',icon:'🖼️'},
+        {id:'worksheets',name:'练习题',icon:'✏️'},
+        {id:'',name:'全部上传',icon:'🗂️'}
+      ]
     };
   },
   computed:{
     greeting(){const h=new Date().getHours();return h<11?'早上好':h<14?'中午好':h<18?'下午好':'晚上好';},
     currentMath(){return this.mathQuestions[this.mathIndex]||{};},
-    currentFeature(){if(this.view==='chinese')return this.chineseMode==='dictation'?'语文听写':'识字手写';if(this.view==='math')return this.mathQuestions.length&&!this.mathFinished?'算术答题':'数学区';if(this.view==='print')return'题目打印';return'';}
+    currentFeature(){if(this.view==='chinese')return this.chineseMode==='dictation'?'语文听写':'识字手写';if(this.view==='math')return this.mathQuestions.length&&!this.mathFinished?'算术答题':'数学区';if(this.view==='print')return'题目打印';return'';},
+    libraryPlaceholder(){
+      return {textbooks:'输入年级、科目或书名，如：数学',character:'输入一个汉字，如：学',dictionary:'输入英文单词，如：apple',poetry:'输入篇名或作者，如：静夜思'}[this.libraryType]||'输入查询内容';
+    },
+    libraryHint(){
+      return {textbooks:'只展示教材链接，不会把 PDF 下载到服务器。',character:'数据来自本地汉字笔顺库。',dictionary:'数据来自本地英汉词典。',poetry:'数据来自本地古诗词库，显示标题、作者和诗句。',english:'儿童英语图片与音频，点「打开」即可听看。'}[this.libraryType]||'';
+    },
+    libraryIcon(){return {textbooks:'📚',character:'✍️',dictionary:'🔤',poetry:'📜',english:'🎧'}[this.libraryType]||'📄';}
   },
   async mounted(){
     this.heartbeatBusy=false;
@@ -50,7 +74,16 @@ createApp({
     async changePassword(){if(this.passwordForm.newPassword!==this.passwordForm.confirmPassword){this.showToast('两次输入的新密码不一致');return;}try{await this.api('auth/password',{method:'POST',body:JSON.stringify(this.passwordForm)});this.student.mustChangePassword=false;this.showPassword=false;this.passwordForm={oldPassword:'',newPassword:'',confirmPassword:''};await this.loadDashboard();this.showToast('密码已修改');}catch(error){this.showToast(error.message);}},
     async loadDashboard(){try{this.statsData=await this.api('stats');this.dashboard=this.statsData.today||{};}catch(error){this.dashboard={};if(this.hasPerm('STATS'))this.showToast(error.message);}},
     goHome(){this.view='home';this.mathQuestions=[];this.dictationWord=null;this.loadDashboard();window.scrollTo(0,0);this.sendHeartbeat();},
-    async openView(name){this.view=name;window.scrollTo(0,0);if(name==='chinese')await this.loadWords();if(name==='mistakes')await this.loadMistakes();if(name==='records')await this.loadRecords();if(name==='resources')await this.loadResources();if(name==='stats')await this.loadStats();if(name==='print'&&!this.printQuestions.length)await this.generatePrintable();this.sendHeartbeat();},
+    async openView(name){
+      this.view=name;window.scrollTo(0,0);
+      if(name==='chinese')await this.loadWords();
+      if(name==='mistakes')await this.loadMistakes();
+      if(name==='records')await this.loadRecords();
+      if(name==='resources'){await this.searchLibrary();await this.loadResources();}
+      if(name==='stats')await this.loadStats();
+      if(name==='print'&&!this.printQuestions.length)await this.generatePrintable();
+      this.sendHeartbeat();
+    },
     async openSubject(subject){this.subjectName=subject;this.view='subject';try{this.subjectItems=await this.api('content?subject='+encodeURIComponent(subject));}catch(error){this.showToast(error.message);}this.sendHeartbeat();},
     chooseStage(stage){this.selectedStage=stage;this.showToast('已选择'+stage);this.openView('chinese');},
     showToast(message){this.toast=message;clearTimeout(this.toastTimer);this.toastTimer=setTimeout(()=>this.toast='',2200);},
@@ -74,7 +107,62 @@ createApp({
     statusClass(status){return status==='已掌握'?'status-mastered':status==='待复习'?'status-pending':'status-learning';},
     async loadRecords(){try{this.recordList=await this.api('records');}catch(error){this.showToast(error.message);}},
     async loadStats(){try{this.statsData=await this.api('stats');this.dashboard=this.statsData.today||{};}catch(error){this.showToast(error.message);}},
-    async loadResources(){try{this.resourceList=await this.api('resources'+(this.resourceSubject?'?subject='+encodeURIComponent(this.resourceSubject):''));}catch(error){this.showToast(error.message);}},
+    async loadResources(){
+      try{
+        const q=this.resourceSubject?'?subject='+encodeURIComponent(this.resourceSubject):'';
+        this.resourceList=await this.api('resources'+q);
+      }catch(error){this.showToast(error.message);}
+    },
+    /** 切换开放学习库类型并立即查询（教材/英语可无关键字）。 */
+    async selectLibraryType(type){
+      this.libraryType=type;
+      this.libraryQuery='';
+      this.libraryItems=[];
+      this.libraryTip='';
+      await this.searchLibrary();
+    },
+    /** 查询本地学习库；缺关键字时给提示，不静默空白。 */
+    async searchLibrary(){
+      this.libraryLoading=true;
+      this.libraryTip='';
+      try{
+        if(this.libraryType==='english'){
+          this.libraryItems=await this.api('resources?subject=english');
+          if(!this.libraryItems.length)this.libraryTip='暂无英语听说素材。';
+          return;
+        }
+        if(this.libraryType!=='textbooks'&&!this.libraryQuery){
+          this.libraryItems=[];
+          this.libraryTip='请输入内容后再点查询。例如：'+this.libraryPlaceholder.replace(/^输入/,'').replace(/，.*$/,'');
+          return;
+        }
+        const key=this.libraryType==='character'?'value':'query';
+        const data=await this.api(`library/${this.libraryType}?${key}=${encodeURIComponent(this.libraryQuery)}`);
+        this.libraryItems=Array.isArray(data)?data:[data];
+        if(!this.libraryItems.length)this.libraryTip='没有找到匹配内容，换个词试试。';
+      }catch(error){
+        this.libraryItems=[];
+        this.libraryTip=error.message||'查询失败，请稍后再试';
+        this.showToast(error.message);
+      }finally{
+        this.libraryLoading=false;
+      }
+    },
+    libraryTitle(item){
+      if(item.title)return item.title+(item.author?' · '+item.author:'');
+      if(item.path&&this.libraryType==='english')return item.path.split('/').pop();
+      return item.path||item.word||item.character||'学习资料';
+    },
+    libraryText(item){
+      if(item.paragraphs)return (item.paragraphs||[]).join(' ');
+      if(item.translation)return item.translation;
+      if(Array.isArray(item.pinyin))return item.pinyin.join(' ');
+      if(item.pinyin)return item.pinyin;
+      if(item.definition)return item.definition;
+      if(item.path&&item.size!=null)return this.formatSize(item.size);
+      return item.author||'';
+    },
+    openLibrary(item){if(item.url)window.open(item.url,'_blank','noopener');},
     async openResource(path){try{const response=await fetch('api/resources/file?path='+encodeURIComponent(path),{headers:{'X-Session-Token':this.token}});if(!response.ok)throw new Error('资源打开失败');const blob=await response.blob();window.open(URL.createObjectURL(blob),'_blank');}catch(error){this.showToast(error.message);}},
     async generatePrintable(){try{this.printQuestions=await this.api(`math/printable?max=${this.printConfig.max}&count=${this.printConfig.count}&operation=${this.printConfig.operation}&wordProblems=${this.printConfig.wordProblems}&stage=${encodeURIComponent(this.selectedStage)}`);}catch(error){this.showToast(error.message);}},
     printWorksheet(){window.print();},
