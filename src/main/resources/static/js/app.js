@@ -117,7 +117,7 @@ createApp({
       this.idleTimer=setTimeout(()=>this.idleLogout(),this.idleMs);
     },
     async idleLogout(){
-      try{await this.api('auth/logout',{method:'POST'});}catch(_){}
+      try{await this.api('auth/logout?reason=idle',{method:'POST'});}catch(_){}
       this.clearSession();
       this.error='已超过10分钟未操作，请重新登录';
       this.authMode='login';

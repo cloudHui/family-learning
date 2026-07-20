@@ -1,6 +1,8 @@
 package cc.ccwu.familylearning.service;
 
 import cc.ccwu.familylearning.model.Student;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AuthService {
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private final StudentService students;
     private final UsageService usage;
     private final InviteService invites;
@@ -45,8 +49,10 @@ public class AuthService {
         if (!students.passwordMatches(user, password)) throw new IllegalArgumentException("用户名或密码不正确");
         students.recordLogin(user);
         String token = newToken();
-        sessions.put(token, new Session(user.id));
+        Session session = new Session(user, device);
+        sessions.put(token, session);
         usage.login(user, device, false);
+        log.info("用户登录 username={}, name={}, ip={}, device={}", session.username, session.name, session.lastIp, session.device);
         return new LoginResult(token, students.view(user));
     }
 
@@ -62,15 +68,22 @@ public class AuthService {
         if (hasInvite) invites.consume(inviteToken);
         students.recordLogin(user);
         String token = newToken();
-        sessions.put(token, new Session(user.id));
+        Session session = new Session(user, device);
+        sessions.put(token, session);
         usage.login(user, device, true);
+        log.info("用户注册登录 username={}, name={}, ip={}, device={}, invite={}",
+                session.username, session.name, session.lastIp, session.device, hasInvite);
         return new LoginResult(token, students.view(user));
     }
 
     public void logout(String token) {
-        if (token == null) return;
-        Session session = sessions.remove(token);
-        if (session != null) usage.logout(session.userId);
+        logout(token, null);
+    }
+
+    public void logout(String token, String reason) {
+        String label = reason == null || reason.trim().isEmpty() ? "主动退出" : reason.trim();
+        if ("idle".equalsIgnoreCase(label) || "空闲超时".equals(label)) label = "空闲超时(前端)";
+        endSession(token, label, ClientIp.current());
     }
 
     /** 普通接口：校验会话并刷新空闲计时。 */
@@ -88,16 +101,17 @@ public class AuthService {
         Session session = sessions.get(token);
         if (session == null) throw new SecurityException("登录已过期，请重新登录");
         LocalDateTime now = LocalDateTime.now();
+        String ip = ClientIp.current();
         if (session.lastActivityAt.plus(idleTimeout).isBefore(now)) {
-            sessions.remove(token);
-            usage.logout(session.userId);
+            endSession(token, "空闲超时", ip);
             throw new SecurityException("已超过" + idleTimeout.toMinutes() + "分钟未操作，请重新登录");
         }
         Student user = students.get(session.userId);
         if (user == null || !user.enabled) {
-            sessions.remove(token);
+            endSession(token, "账号不可用", ip);
             throw new SecurityException("账号不可用");
         }
+        session.lastIp = ip;
         if (touchActivity) session.lastActivityAt = now;
         return user;
     }
@@ -120,16 +134,27 @@ public class AuthService {
     @Scheduled(fixedDelay = 60000)
     public void removeExpiredSessions() {
         LocalDateTime now = LocalDateTime.now();
-        sessions.entrySet().removeIf(entry -> {
+        for (Map.Entry<String, Session> entry : sessions.entrySet()) {
             Session session = entry.getValue();
-            boolean expired = session.lastActivityAt.plus(idleTimeout).isBefore(now);
-            if (expired) usage.logout(session.userId);
-            return expired;
-        });
+            if (session.lastActivityAt.plus(idleTimeout).isBefore(now)) {
+                endSession(entry.getKey(), "空闲超时(定时清理)", session.lastIp == null ? "-" : session.lastIp);
+            }
+        }
     }
 
     public void requireSelfOrAdmin(Student current, String userId) {
         if (!current.id.equals(userId) && !"ADMIN".equals(current.role)) throw new SecurityException("不能访问其他用户数据");
+    }
+
+    private void endSession(String token, String reason, String ip) {
+        if (token == null) return;
+        Session session = sessions.remove(token);
+        if (session == null) return;
+        usage.logout(session.userId);
+        log.info("用户掉线 reason={}, username={}, name={}, userId={}, ip={}, device={}, lastActivityAt={}",
+                reason, session.username, session.name, session.userId,
+                ip == null || ip.isEmpty() ? session.lastIp : ip,
+                session.device, session.lastActivityAt);
     }
 
     private void requireChangedPassword(Student user) {
@@ -142,9 +167,18 @@ public class AuthService {
 
     public static class Session {
         public String userId;
+        public String username;
+        public String name;
+        public String device;
+        public String lastIp;
         public LocalDateTime lastActivityAt;
-        public Session(String userId) {
-            this.userId = userId;
+
+        public Session(Student user, String device) {
+            this.userId = user.id;
+            this.username = user.username;
+            this.name = user.name;
+            this.device = device == null || device.trim().isEmpty() ? "未知设备" : device.trim();
+            this.lastIp = ClientIp.current();
             this.lastActivityAt = LocalDateTime.now();
         }
     }

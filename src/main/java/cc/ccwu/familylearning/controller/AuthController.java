@@ -45,8 +45,9 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public Map<String, Object> logout(@RequestHeader(value = "X-Session-Token", required = false) String token) {
-        auth.logout(token);
+    public Map<String, Object> logout(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                                      @RequestParam(value = "reason", required = false) String reason) {
+        auth.logout(token, reason);
         return ok("已退出");
     }
 

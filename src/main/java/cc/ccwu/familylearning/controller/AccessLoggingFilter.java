@@ -19,6 +19,10 @@ public class AccessLoggingFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         long started = System.currentTimeMillis();
         try { chain.doFilter(request, response); }
-        finally { log.info("访问 method={}, path={}, status={}, durationMs={}", request.getMethod(), request.getRequestURI(), response.getStatus(), System.currentTimeMillis() - started); }
+        finally {
+            log.info("访问 method={}, path={}, status={}, durationMs={}, ip={}",
+                    request.getMethod(), request.getRequestURI(), response.getStatus(),
+                    System.currentTimeMillis() - started, cc.ccwu.familylearning.service.ClientIp.from(request));
+        }
     }
 }
