@@ -9,6 +9,7 @@ User=family-learning
 Group=family-learning
 WorkingDirectory=/opt/family-learning
 EnvironmentFile=/etc/family-learning/family-learning.env
+Environment=LOG_DIR=/var/log/family-learning
 ExecStart=/usr/bin/java -Xms64m -Xmx256m -XX:+UseG1GC -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai -jar /opt/family-learning/family-learning.jar
 Restart=on-failure
 RestartSec=5s

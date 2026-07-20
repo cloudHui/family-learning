@@ -11,6 +11,7 @@ LOG_DIR=/var/log/family-learning
 CONFIG_DIR=/etc/family-learning
 ENV_FILE=$CONFIG_DIR/family-learning.env
 SERVICE=family-learning.service
+HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180}
 NGINX_CONF=/etc/nginx/conf.d/family-learning.conf
 ACTION=${1:-install}
 
@@ -269,7 +270,6 @@ install_service() {
   # 尽量回收 page cache，给 JVM 启动腾空间
   sync
   echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
-  systemctl restart "$SERVICE"
 }
 
 write_nginx_http() {
@@ -365,28 +365,32 @@ EOF
 health_check() {
   # /api/health 需登录；部署探针改查服务状态与首页静态入口
   url="http://127.0.0.1:8088/$ACCESS_CODE/"
-  # 小内存机器启动更慢，多等一会
-  limit=30
-  low_memory && limit=90
-  count=0
-  while [ "$count" -lt "$limit" ]; do
+  deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
     if systemctl is-active --quiet "$SERVICE" 2>/dev/null && curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
       return 0
     fi
-    count=$((count + 1)); sleep 1
+    sleep 1
   done
-  say "健康检查未通过（已等待 ${limit}s）：$url"
+  say "健康检查未通过（已等待 ${HEALTH_TIMEOUT}s）：$url"
   systemctl --no-pager --full status "$SERVICE" 2>/dev/null | head -n 20 || true
   journalctl -u "$SERVICE" -n 40 --no-pager 2>/dev/null || true
   return 1
+}
+
+restart_and_check() {
+  say "重启服务: $SERVICE"
+  systemctl restart "$SERVICE" || return 1
+  say "健康检查: http://127.0.0.1:8088/$ACCESS_CODE/"
+  health_check
 }
 
 rollback() {
   [ -f "$APP_DIR/family-learning.jar.previous" ] || return 1
   say "健康检查失败，恢复上一版本"
   cp -f "$APP_DIR/family-learning.jar.previous" "$APP_DIR/family-learning.jar"
-  systemctl restart "$SERVICE"
-  return 0
+  systemctl restart "$SERVICE" || return 1
+  health_check
 }
 
 uninstall_app() {
@@ -401,7 +405,7 @@ case "$ACTION" in
   install)
     preflight; ensure_swap; install_packages; load_or_prompt_config; fetch_source; build_jar; write_env; migrate_json
     install_service; write_nginx_http; enable_https; configure_firewall
-    health_check || { rollback; die "启动失败，请运行：journalctl -u $SERVICE -n 100 --no-pager"; }
+    restart_and_check || { rollback; die "启动失败，请运行：journalctl -u $SERVICE -n 100 --no-pager"; }
     scheme=http; [ "${HTTPS_ACTIVE:-no}" = yes ] && scheme=https
     host=${DOMAIN:-${PUBLIC_IP:-服务器IP}}
     say "安装完成：$scheme://$host/$ACCESS_CODE/"
@@ -417,7 +421,7 @@ case "$ACTION" in
     fi
     preflight; ensure_swap; install_packages; load_or_prompt_config
     build_jar; write_env; migrate_json; install_service
-    health_check || { rollback; die "更新失败，已尝试回滚。请查看：journalctl -u $SERVICE -n 100 --no-pager"; }
+    restart_and_check || { rollback; die "更新失败，已尝试回滚。请查看：journalctl -u $SERVICE -n 100 --no-pager"; }
     say "更新完成" ;;
   uninstall) uninstall_app ;;
   *) die "用法：install.sh {install|update|uninstall}" ;;
