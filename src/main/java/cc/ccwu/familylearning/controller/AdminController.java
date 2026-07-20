@@ -17,14 +17,22 @@ public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
     private final AuthService auth;private final StudentService students;private final WordService words;private final ContentService content;
     private final RecordService records;private final MistakeService mistakes;private final StatsService stats;private final UsageService usage;private final DailyReportService reports;
-    public AdminController(AuthService auth,StudentService students,WordService words,ContentService content,RecordService records,MistakeService mistakes,StatsService stats,UsageService usage,DailyReportService reports){this.auth=auth;this.students=students;this.words=words;this.content=content;this.records=records;this.mistakes=mistakes;this.stats=stats;this.usage=usage;this.reports=reports;}
-    private void admin(String token)throws Exception{Student operator=auth.requireAdmin(token);log.info("管理员进入后台接口: operator={}, tokenPresent={}",operator.username,token!=null);}
+    private final InviteService invites;
+    public AdminController(AuthService auth,StudentService students,WordService words,ContentService content,RecordService records,MistakeService mistakes,StatsService stats,UsageService usage,DailyReportService reports,InviteService invites){this.auth=auth;this.students=students;this.words=words;this.content=content;this.records=records;this.mistakes=mistakes;this.stats=stats;this.usage=usage;this.reports=reports;this.invites=invites;}
+    private Student admin(String token)throws Exception{Student operator=auth.requireAdmin(token);log.info("管理员进入后台接口: operator={}, tokenPresent={}",operator.username,token!=null);return operator;}
 
     @GetMapping("/users") public List<Map<String,Object>> users(@RequestHeader("X-Session-Token")String token)throws Exception{admin(token);return students.list().stream().map(students::view).collect(Collectors.toList());}
     @PostMapping("/users") public Map<String,Object> createUser(@RequestHeader("X-Session-Token")String token,@RequestBody UserRequest request)throws Exception{admin(token);return students.view(students.create(request.username,request.name,request.password==null?StudentService.DEFAULT_PASSWORD:request.password,request.role,request.permissions));}
     @PutMapping("/users/{id}") public Map<String,Object> updateUser(@RequestHeader("X-Session-Token")String token,@PathVariable String id,@RequestBody Student changes)throws Exception{admin(token);return students.view(students.update(id,changes));}
     @DeleteMapping("/users/{id}") public Map<String,Object> deleteUser(@RequestHeader("X-Session-Token")String token,@PathVariable String id)throws Exception{admin(token);students.delete(id);return ok("用户已删除");}
     @PostMapping("/users/{id}/reset-password") public Map<String,Object> reset(@RequestHeader("X-Session-Token")String token,@PathVariable String id)throws Exception{admin(token);students.resetPassword(id);return ok("密码已重置为123456");}
+
+    @GetMapping("/invites") public List<Invite> listInvites(@RequestHeader("X-Session-Token")String token)throws Exception{admin(token);return invites.list();}
+    @PostMapping("/invites") public Invite createInvite(@RequestHeader("X-Session-Token")String token,@RequestBody InviteRequest request)throws Exception{
+        Student operator=admin(token);
+        return invites.create(operator.username, request==null?null:request.note, request==null||request.maxUses<=0?1:request.maxUses, request==null||request.validDays<=0?7:request.validDays);
+    }
+    @DeleteMapping("/invites/{id}") public Map<String,Object> revokeInvite(@RequestHeader("X-Session-Token")String token,@PathVariable String id)throws Exception{admin(token);invites.revoke(id);return ok("邀请已作废");}
 
     @GetMapping("/words") public List<WordItem> words(@RequestHeader("X-Session-Token")String token)throws Exception{admin(token);return words.list(null);}
     @PostMapping("/words") public WordItem saveWord(@RequestHeader("X-Session-Token")String token,@RequestBody WordItem item)throws Exception{admin(token);return words.save(item);}
@@ -54,4 +62,5 @@ public class AdminController {
     @PostMapping("/report/send") public Map<String,Object> send(@RequestHeader("X-Session-Token")String token)throws Exception{admin(token);return reports.send(true);}
     private Map<String,Object> ok(String message){return java.util.Collections.<String,Object>singletonMap("message",message);}
     public static class UserRequest{public String username;public String name;public String password;public String role;public List<String> permissions=new ArrayList<>();}
+    public static class InviteRequest{public String note;public int maxUses=1;public int validDays=7;}
 }

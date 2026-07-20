@@ -24,7 +24,7 @@ public class StudentService {
     public static final String DEFAULT_PASSWORD = "123456";
     public static final String ARCHIVE_ID_PATTERN = "[a-f0-9]{20}";
     public static final List<String> DEFAULT_PERMISSIONS = Arrays.asList(
-            "CHINESE", "MATH", "PRIMARY", "RESOURCES", "MISTAKES", "RECORDS", "STATS", "PRINT");
+            "CHINESE", "MATH", "ENGLISH", "PRIMARY", "RESOURCES", "MISTAKES", "RECORDS", "STATS", "PRINT");
     public static final List<String> ALL_PERMISSIONS = Arrays.asList(
             "CHINESE", "MATH", "ENGLISH", "HISTORY", "CHEMISTRY", "PRIMARY", "RESOURCES",
             "MISTAKES", "RECORDS", "STATS", "PRINT", "ADMIN");

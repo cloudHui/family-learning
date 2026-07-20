@@ -42,17 +42,16 @@ async function main() {
   try {
     check((await request('')).data.includes('成长小课堂'), '学习首页可访问');
     check((await request('admin.html')).data.includes('管理后台'), '管理后台页面可访问');
-    check((await request('api/health')).data.status === 'ok', 'HTTPS 健康接口');
+    check((await request('api/health').catch(error=>({status:error.message.includes('HTTP 401')?401:0}))).status===401, '未登录健康接口拒绝访问');
 
     const admin = await request('api/auth/login', {method:'POST', body:{username:'admin', password:process.env.ADMIN_PASSWORD || '123456', device:'实机验收'}});
     adminToken = admin.data.token;
     if (admin.data.user.mustChangePassword) throw new Error('管理员必须先在网页中修改初始密码，再执行完整实机验收');
-    const user = await request('api/auth/login', {method:'POST', body:{username:unique, password:'123456', device:'实机验收'}});
+    check((await request('api/health', {token:adminToken})).data.status === 'ok', '登录后健康接口可用');
+    const user = await request('api/auth/register', {method:'POST', body:{username:unique, password:'smoke789', name:unique, invite:'', device:'实机验收'}});
     userToken = user.data.token; userId = user.data.user.id;
-    check(user.data.user.username === unique, '新用户默认密码建档与登录');
+    check(user.data.user.username === unique, '开放注册建档并进入');
     check((await request('api/auth/me', {token:userToken})).data.id === userId, '会话身份识别');
-    check((await request('api/words', {token:userToken}).catch(error=>({status:error.message.includes('HTTP 401')?401:0}))).status===401, '首次登录未改密时禁止学习');
-    await request('api/auth/password',{method:'POST',token:userToken,body:{oldPassword:'123456',newPassword:'smoke789'}});
 
     const words = (await request('api/words?stage='+encodeURIComponent('幼小衔接'), {token:userToken})).data;
     check(words.length >= 30, '分阶段 30 字识字库');

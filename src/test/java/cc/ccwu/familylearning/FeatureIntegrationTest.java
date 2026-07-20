@@ -62,15 +62,24 @@ class FeatureIntegrationTest {
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string("X-Frame-Options", "DENY"))
                 .andExpect(header().exists("Content-Security-Policy"));
+        mvc.perform(get("/api/health")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/registration")).andExpect(status().isOk()).andExpect(jsonPath("$.openRegister").value(true));
+        mvc.perform(post("/api/auth/login").contentType("application/json").content("{\"username\":\"ghost\",\"password\":\"123456\",\"device\":\"测试\"}"))
+                .andExpect(status().isBadRequest());
         JsonNode adminLogin = login("admin", "123456"); String admin = adminLogin.get("token").asText();
         org.assertj.core.api.Assertions.assertThat(adminLogin.get("user").get("mustChangePassword").asBoolean()).isTrue();
         changePassword(admin,"123456","admin789");
-        JsonNode userLogin = login("testkid", "123456"); String token = userLogin.get("token").asText();
+        mvc.perform(get("/api/health").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ok"));
+        JsonNode invite = json(mvc.perform(post("/api/admin/invites").header("X-Session-Token",admin).contentType("application/json").content("{\"note\":\"测试邀请\",\"maxUses\":2,\"validDays\":3}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        JsonNode userLogin = register("testkid", "kidpass", "测试小孩", null); String token = userLogin.get("token").asText();
         String userId = userLogin.get("user").get("id").asText();
+        mvc.perform(post("/api/auth/register").contentType("application/json")
+                .content("{\"username\":\"invited\",\"password\":\"invite789\",\"name\":\"邀请用户\",\"invite\":\""+invite.get("token").asText()+"\",\"device\":\"测试\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.user.username").value("invited"));
 
         mvc.perform(get("/api/auth/me").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.username").value("testkid"));
-        mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.message").value("请先修改初始密码"));
-        changePassword(token,"123456","kidpass");
+        mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$[0].character").exists());
         Files.write(ROOT.resolve("datasets/textbooks.json"), "[{\"path\":\"小学/数学.pdf\",\"url\":\"https://github.com/example\"},{\"path\":\"小学/语文/上册.pdf\",\"url\":\"https://github.com/example/yuwen\"}]".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(ROOT.resolve("datasets/dictionary"));
         Files.write(ROOT.resolve("datasets/dictionary/te.jsonl"), "{\"word\":\"test\",\"translation\":\"测试\"}\n".getBytes(StandardCharsets.UTF_8));
@@ -82,7 +91,6 @@ class FeatureIntegrationTest {
         Files.write(ROOT.resolve("resources/english/kids/audio/dog.mp3"), "id3".getBytes(StandardCharsets.UTF_8));
 
         mvc.perform(get("/api/admin/users").header("X-Session-Token", token)).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$[0].character").exists());
         mvc.perform(get("/api/math/questions?max=10&count=5").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5));
         mvc.perform(get("/api/math/printable?max=10&count=5&wordProblems=2&stage=幼小衔接").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(7));
         mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].translation").value("测试"));
@@ -105,7 +113,7 @@ class FeatureIntegrationTest {
         JsonNode users = json(mvc.perform(get("/api/admin/users").header("X-Session-Token",admin)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         org.assertj.core.api.Assertions.assertThat(users.size()).isGreaterThanOrEqualTo(2);
         mvc.perform(get("/api/admin/online").header("X-Session-Token",admin)).andExpect(status().isOk());
-        mvc.perform(get("/api/admin/stats").header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.activeUsers").value(2));
+        mvc.perform(get("/api/admin/stats").header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.activeUsers").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)));
         mvc.perform(get("/api/admin/stats/"+userId).header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.today.completed").value(5));
 
         String managed="{\"username\":\"managed\",\"name\":\"权限测试\",\"role\":\"USER\",\"permissions\":[\"CHINESE\"]}";
@@ -152,6 +160,10 @@ class FeatureIntegrationTest {
     private JsonNode login(String username,String password)throws Exception{
         String body="{\"username\":\""+username+"\",\"password\":\""+password+"\",\"device\":\"测试\"}";
         return json(mvc.perform(post("/api/auth/login").contentType("application/json").content(body)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    }
+    private JsonNode register(String username,String password,String name,String invite)throws Exception{
+        String body="{\"username\":\""+username+"\",\"password\":\""+password+"\",\"name\":\""+name+"\",\"invite\":\""+(invite==null?"":invite)+"\",\"device\":\"测试\"}";
+        return json(mvc.perform(post("/api/auth/register").contentType("application/json").content(body)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     }
     private void changePassword(String token,String oldPassword,String newPassword)throws Exception{
         String body="{\"oldPassword\":\""+oldPassword+"\",\"newPassword\":\""+newPassword+"\"}";

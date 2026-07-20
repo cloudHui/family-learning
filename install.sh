@@ -104,6 +104,8 @@ MAIL_USERNAME=${MAIL_USERNAME:-}
 MAIL_PASSWORD=${MAIL_PASSWORD:-}
 REPORT_RECIPIENT=${REPORT_RECIPIENT:-}
 CERT_EMAIL=${CERT_EMAIL:-}
+OPEN_REGISTER=${OPEN_REGISTER:-true}
+SESSION_IDLE_MINUTES=${SESSION_IDLE_MINUTES:-10}
 EOF
   chmod 600 "$ENV_FILE"
 }
@@ -272,10 +274,13 @@ EOF
 }
 
 health_check() {
-  url="http://127.0.0.1:8088/$ACCESS_CODE/api/health"
+  # /api/health 需登录；部署探针改查服务状态与首页静态入口
+  url="http://127.0.0.1:8088/$ACCESS_CODE/"
   count=0
   while [ "$count" -lt 30 ]; do
-    curl -fsS --max-time 2 "$url" >/dev/null 2>&1 && return 0
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null && curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
     count=$((count + 1)); sleep 1
   done
   return 1

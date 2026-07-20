@@ -4,7 +4,8 @@ createApp({
   data() {
     return {
       loading:false,error:'',toast:'',toastTimer:null,token:localStorage.getItem('learningToken')||'',
-      nameInput:'',passwordInput:'123456',student:null,view:'home',heartbeatTimer:null,
+      authMode:'login',displayName:'',confirmPassword:'',inviteToken:'',regOptions:{openRegister:true,idleMinutes:10},
+      nameInput:'',passwordInput:'',student:null,view:'home',heartbeatTimer:null,idleTimer:null,idleMs:10*60*1000,
       dashboard:{},statsData:{},showPassword:false,passwordForm:{oldPassword:'',newPassword:'',confirmPassword:''},
       selectedStage:'幼小衔接',stages:['幼小衔接','一年级','二年级','三年级','四年级','五年级','六年级'],
       chineseMode:'learn',words:[],selectedWord:null,showGuide:true,dictationWord:null,dictationRevealed:false,canvasDrawing:false,canvasLast:null,
@@ -44,15 +45,30 @@ createApp({
     libraryHint(){
       return {textbooks:'可按目录浏览或搜索书名；只打开外部教材链接，不下载 PDF。',character:'输入一个汉字，查看笔顺动画并去语文区练写。',dictionary:'数据来自本地英汉词典。',poetry:'搜索篇名或作者，打开阅读卡可朗读并记学习。',english:'儿童英语图卡：点卡片看图听音。'}[this.libraryType]||'';
     },
-    libraryIcon(){return {textbooks:'📚',character:'✍️',dictionary:'🔤',poetry:'📜',english:'🎧'}[this.libraryType]||'📄';}
+    libraryIcon(){return {textbooks:'📚',character:'✍️',dictionary:'🔤',poetry:'📜',english:'🎧'}[this.libraryType]||'📄';},
+    visibleLibraryTypes(){
+      return this.libraryTypes.filter(item=>{
+        if(item.id==='english'||item.id==='dictionary')return this.hasPerm('ENGLISH');
+        if(item.id==='character'||item.id==='poetry')return this.hasPerm('CHINESE');
+        return this.hasPerm('RESOURCES');
+      });
+    }
   },
   async mounted(){
     this.heartbeatBusy=false;
+    this.onUserActivity=()=>this.bumpIdle();
+    ['pointerdown','keydown','touchstart','scroll'].forEach(evt=>window.addEventListener(evt,this.onUserActivity,{passive:true}));
+    const params=new URLSearchParams(location.search);
+    this.inviteToken=params.get('invite')||'';
+    if(this.inviteToken)this.authMode='register';
+    await this.loadRegistrationOptions();
     if(this.token)try{this.student=await this.api('auth/me');this.afterLogin();}catch(_){this.clearSession();}
     window.addEventListener('error',()=>{if(this.token)this.api('auth/frontend-error',{method:'POST'}).catch(()=>{});});
   },
   beforeUnmount(){
     clearInterval(this.heartbeatTimer);
+    clearTimeout(this.idleTimer);
+    ['pointerdown','keydown','touchstart','scroll'].forEach(evt=>window.removeEventListener(evt,this.onUserActivity));
     this.revokeMediaUrls();
     if(this.englishAudio){this.englishAudio.pause();this.englishAudio=null;}
   },
@@ -61,17 +77,53 @@ createApp({
       const headers={...(options.headers||{})};if(this.token)headers['X-Session-Token']=this.token;
       if(options.body&&!(options.body instanceof FormData))headers['Content-Type']='application/json';
       const response=await fetch('api/'+path,{...options,headers});
-      if(!response.ok){let message='请求失败，请稍后再试';try{message=(await response.json()).message||message;}catch(_){}if(response.status===401&&path!=='auth/login')this.clearSession();throw new Error(message);}
+      if(!response.ok){let message='请求失败，请稍后再试';try{message=(await response.json()).message||message;}catch(_){}if(response.status===401&&path!=='auth/login'&&path!=='auth/register'&&!String(path).startsWith('auth/registration'))this.clearSession();throw new Error(message);}
+      if(this.token&&path!=='auth/heartbeat')this.bumpIdle();
       const type=response.headers.get('content-type')||'';return type.includes('json')?response.json():response.text();
+    },
+    async loadRegistrationOptions(){
+      try{
+        const q=this.inviteToken?('?invite='+encodeURIComponent(this.inviteToken)):'';
+        this.regOptions=await this.api('auth/registration'+q);
+        this.idleMs=Math.max(1,Number(this.regOptions.idleMinutes||10))*60*1000;
+      }catch(_){this.regOptions={openRegister:true,idleMinutes:10};}
     },
     async enterStudent(){
       if(!this.nameInput||!this.passwordInput){this.error='请输入用户名和密码';return;}this.loading=true;this.error='';
       try{const result=await this.api('auth/login',{method:'POST',body:JSON.stringify({username:this.nameInput,password:this.passwordInput,device:this.deviceType()})});this.token=result.token;this.student=result.user;localStorage.setItem('learningToken',this.token);this.afterLogin();}
       catch(error){this.error=error.message;}finally{this.loading=false;}
     },
-    afterLogin(){this.selectedStage=this.student.stage||'幼小衔接';this.view='home';if(this.student.mustChangePassword){this.passwordForm={oldPassword:'123456',newPassword:'',confirmPassword:''};this.showPassword=true;}else this.loadDashboard();clearInterval(this.heartbeatTimer);this.sendHeartbeat();this.heartbeatTimer=setInterval(()=>this.sendHeartbeat(),10000);},
+    async registerStudent(){
+      if(!this.nameInput||!this.passwordInput){this.error='请输入用户名和密码';return;}
+      if(this.passwordInput.length<6){this.error='密码至少6位';return;}
+      if(this.passwordInput!==this.confirmPassword){this.error='两次输入的密码不一致';return;}
+      if(!this.regOptions.openRegister&&!this.inviteToken){this.error='请使用邀请链接注册';return;}
+      this.loading=true;this.error='';
+      try{
+        const result=await this.api('auth/register',{method:'POST',body:JSON.stringify({username:this.nameInput,password:this.passwordInput,name:this.displayName||this.nameInput,invite:this.inviteToken||'',device:this.deviceType()})});
+        this.token=result.token;this.student=result.user;localStorage.setItem('learningToken',this.token);this.afterLogin();
+      }catch(error){this.error=error.message;}finally{this.loading=false;}
+    },
+    afterLogin(){
+      this.selectedStage=this.student.stage||'幼小衔接';this.view='home';
+      if(this.visibleLibraryTypes.length&&!this.visibleLibraryTypes.some(item=>item.id===this.libraryType))this.libraryType=this.visibleLibraryTypes[0].id;
+      if(this.student.mustChangePassword){this.passwordForm={oldPassword:'123456',newPassword:'',confirmPassword:''};this.showPassword=true;}else this.loadDashboard();
+      clearInterval(this.heartbeatTimer);this.sendHeartbeat();this.heartbeatTimer=setInterval(()=>this.sendHeartbeat(),10000);
+      this.bumpIdle();
+    },
+    bumpIdle(){
+      if(!this.student)return;
+      clearTimeout(this.idleTimer);
+      this.idleTimer=setTimeout(()=>this.idleLogout(),this.idleMs);
+    },
+    async idleLogout(){
+      try{await this.api('auth/logout',{method:'POST'});}catch(_){}
+      this.clearSession();
+      this.error='已超过10分钟未操作，请重新登录';
+      this.authMode='login';
+    },
     async leaveStudent(){try{await this.api('auth/logout',{method:'POST'});}catch(_){}this.clearSession();},
-    clearSession(){clearInterval(this.heartbeatTimer);this.token='';this.student=null;this.view='home';localStorage.removeItem('learningToken');},
+    clearSession(){clearInterval(this.heartbeatTimer);clearTimeout(this.idleTimer);this.token='';this.student=null;this.view='home';localStorage.removeItem('learningToken');this.revokeMediaUrls();},
     async sendHeartbeat(){if(!this.student||this.heartbeatBusy)return;this.heartbeatBusy=true;try{await this.api('auth/heartbeat',{method:'POST',body:JSON.stringify({page:this.pageName(),feature:this.currentFeature,device:this.deviceType()})});}catch(_){}finally{this.heartbeatBusy=false;}},
     deviceType(){const ua=navigator.userAgent;return /iPad|Tablet/i.test(ua)?'平板':/Mobile|Android|iPhone/i.test(ua)?'手机':'电脑';},
     pageName(){return {home:'首页',chinese:'语文区',math:'数学区',mistakes:'错题库',records:'学习记录',resources:'资源中心',stats:'学习统计',print:'题目打印',stages:'小学阶段',subject:this.subjectName+'区'}[this.view]||this.view;},
@@ -255,7 +307,8 @@ createApp({
       all.forEach(p=>{if(!p||p.length<2)return;minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]);});
       if(!isFinite(minX))return;
       const pad=30;const scale=Math.min((canvas.width-pad*2)/Math.max(1,maxX-minX),(canvas.height-pad*2)/Math.max(1,maxY-minY));
-      const map=(x,y)=>({x:pad+(x-minX)*scale,y:pad+(y-minY)*scale});
+      // Make Me a Hanzi: Y 轴向上；Canvas: Y 轴向下，需翻转
+      const map=(x,y)=>({x:pad+(x-minX)*scale,y:canvas.height-pad-(y-minY)*scale});
       let strokeIndex=0,pointIndex=0,drawing=null;
       const step=()=>{
         if(strokeIndex>=data.medians.length)return;
@@ -272,14 +325,21 @@ createApp({
     },
     async prefetchEnglishImages(){
       for(const item of this.libraryItems){
-        if(item.imagePath)await this.ensureMediaUrl(item.imagePath);
+        if(!item.imagePath)continue;
+        try{await this.ensureMediaUrl(item.imagePath);}catch(_){/* 单卡预取失败不阻断列表 */}
       }
     },
     async ensureMediaUrl(path){
       if(!path)return '';
       if(this.mediaUrls[path])return this.mediaUrls[path];
       const response=await fetch('api/resources/file?path='+encodeURIComponent(path),{headers:{'X-Session-Token':this.token}});
-      if(!response.ok)throw new Error('资源打开失败');
+      if(!response.ok){
+        let message='资源打开失败';
+        try{message=(await response.json()).message||message;}catch(_){}
+        if(response.status===401)this.clearSession();
+        throw new Error(message);
+      }
+      this.bumpIdle();
       const url=URL.createObjectURL(await response.blob());
       this.mediaUrls={...this.mediaUrls,[path]:url};
       return url;
@@ -291,7 +351,7 @@ createApp({
           const url=await this.ensureMediaUrl(item.audioPath);
           if(this.englishAudio){this.englishAudio.pause();}
           this.englishAudio=new Audio(url);
-          this.englishAudio.play().catch(()=>{});
+          this.englishAudio.play().catch(()=>this.showToast('音频播放被浏览器拦截，请再点一次'));
         }
         await this.saveRecord('英语','听说图卡',1,1,{word:item.word});
       }catch(error){this.showToast(error.message);}
@@ -312,7 +372,7 @@ createApp({
       }catch(error){this.showToast(error.message);}
     },
     closePreview(){this.preview=null;},
-    async openResource(path){try{const response=await fetch('api/resources/file?path='+encodeURIComponent(path),{headers:{'X-Session-Token':this.token}});if(!response.ok)throw new Error('资源打开失败');const blob=await response.blob();window.open(URL.createObjectURL(blob),'_blank');}catch(error){this.showToast(error.message);}},
+    async openResource(path){try{const url=await this.ensureMediaUrl(path);window.open(url,'_blank');}catch(error){this.showToast(error.message);}},
     async generatePrintable(){try{this.printQuestions=await this.api(`math/printable?max=${this.printConfig.max}&count=${this.printConfig.count}&operation=${this.printConfig.operation}&wordProblems=${this.printConfig.wordProblems}&stage=${encodeURIComponent(this.selectedStage)}`);}catch(error){this.showToast(error.message);}},
     printWorksheet(){window.print();},
     fileIcon(path){const e=path.split('.').pop().toLowerCase();return e==='pdf'?'📕':['mp3','wav','ogg'].includes(e)?'🎵':['png','jpg','jpeg','gif','webp'].includes(e)?'🖼️':e==='mp4'?'🎬':'📄';},

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css?v=20260720-1">
-  <link rel="stylesheet" href="css/features.css?v=20260720-1">
+  <link rel="stylesheet" href="css/app.css?v=20260720-2">
+  <link rel="stylesheet" href="css/features.css?v=20260720-2">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -17,13 +17,26 @@
         <div class="brand-mark">学</div>
         <p class="eyebrow">家庭学习工具</p>
         <h1>欢迎来到成长小课堂</h1>
-        <p class="welcome-tip">输入用户名和密码，继续今天的学习</p>
-        <form @submit.prevent="enterStudent" class="name-form">
+        <p class="welcome-tip">{{ authMode==='register' ? '创建账号后开始学习' : '登录后继续今天的学习' }}</p>
+        <div class="auth-tabs">
+          <button type="button" :class="{active:authMode==='login'}" @click="authMode='login';error=''">登录</button>
+          <button type="button" :class="{active:authMode==='register'}" @click="authMode='register';error=''">注册</button>
+        </div>
+        <form v-if="authMode==='login'" @submit.prevent="enterStudent" class="name-form">
           <input v-model.trim="nameInput" maxlength="20" autocomplete="username" placeholder="请输入用户名" aria-label="用户名">
-          <input v-model="passwordInput" type="password" maxlength="64" autocomplete="current-password" placeholder="密码（新用户默认123456）" aria-label="密码">
-          <button class="primary big" :disabled="loading">{{ loading ? '正在进入…' : '登录 / 首次进入' }}</button>
+          <input v-model="passwordInput" type="password" maxlength="64" autocomplete="current-password" placeholder="请输入密码" aria-label="密码">
+          <button class="primary big" :disabled="loading">{{ loading ? '正在登录…' : '登录' }}</button>
         </form>
-        <p class="login-note">新用户名使用默认密码 123456 会自动创建账号</p>
+        <form v-else @submit.prevent="registerStudent" class="name-form">
+          <input v-model.trim="nameInput" maxlength="20" autocomplete="username" placeholder="用户名" aria-label="用户名">
+          <input v-model.trim="displayName" maxlength="20" autocomplete="nickname" placeholder="显示姓名（可选）" aria-label="显示姓名">
+          <input v-model="passwordInput" type="password" maxlength="64" autocomplete="new-password" placeholder="设置密码（至少6位）" aria-label="密码">
+          <input v-model="confirmPassword" type="password" maxlength="64" autocomplete="new-password" placeholder="确认密码" aria-label="确认密码">
+          <input v-if="!regOptions.openRegister || inviteToken" v-model.trim="inviteToken" maxlength="64" placeholder="邀请码（分享链接会自动填入）" aria-label="邀请码">
+          <button class="primary big" :disabled="loading || (!regOptions.openRegister && !inviteToken)">{{ loading ? '正在注册…' : '注册并进入' }}</button>
+        </form>
+        <p class="login-note" v-if="authMode==='register'">{{ regOptions.openRegister ? '可自助注册；也可用管理员分享的邀请链接注册。' : '当前仅支持邀请链接注册，请使用分享给你的链接。' }}</p>
+        <p class="login-note" v-else>未登录无法使用学习功能；10分钟无操作将自动退出。</p>
         <p v-if="error" class="error-text">{{ error }}</p>
       </section>
     </main>
@@ -194,7 +207,7 @@
           <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>开放学习库</h1><p class="muted">图卡、笔顺、诗词与教材都在这里学；下方才是家庭上传文件。</p></div></div>
           <article class="card library-search">
             <div class="library-types">
-              <button v-for="item in libraryTypes" :key="item.id" :class="{active:libraryType===item.id}" @click="selectLibraryType(item.id)">
+              <button v-for="item in visibleLibraryTypes" :key="item.id" :class="{active:libraryType===item.id}" @click="selectLibraryType(item.id)">
                 <span>{{ item.icon }}</span>{{ item.name }}
               </button>
             </div>
@@ -306,7 +319,7 @@
       </div>
     </div>
   </div>
-  <script src="js/vue.global.prod.js?v=20260720-1"></script>
-  <script src="js/app.js?v=20260720-1"></script>
+  <script src="js/vue.global.prod.js?v=20260720-2"></script>
+  <script src="js/app.js?v=20260720-2"></script>
 </body>
 </html>

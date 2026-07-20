@@ -31,7 +31,11 @@ public class ApiController {
         this.auth=auth;this.words=words;this.math=math;this.records=records;this.mistakes=mistakes;this.stats=stats;this.content=content;
     }
 
-    @GetMapping("/health") public Map<String,Object> health(){return java.util.Collections.<String,Object>singletonMap("status","ok");}
+    @GetMapping("/health")
+    public Map<String,Object> health(@RequestHeader(value="X-Session-Token",required=false) String token) throws Exception {
+        auth.require(token);
+        return java.util.Collections.<String,Object>singletonMap("status","ok");
+    }
 
     @GetMapping("/words")
     public List<WordItem> words(@RequestHeader(value="X-Session-Token",required=false) String token,

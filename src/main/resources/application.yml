@@ -38,6 +38,10 @@ family-learning:
   data-dir: ${DATA_DIR:./data}
   resource-dir: ${RESOURCE_DIR:./resources}
   dataset-dir: ${DATASET_DIR:${DATA_DIR:./data}/datasets}
+  registration:
+    open-enabled: ${OPEN_REGISTER:true}
+  session:
+    idle-minutes: ${SESSION_IDLE_MINUTES:10}
   report:
     cron: ${REPORT_CRON:0 55 23 * * *}
     zone: ${REPORT_ZONE:Asia/Shanghai}

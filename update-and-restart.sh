@@ -28,7 +28,7 @@ load_config() {
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=${configured_access_code#/}
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=family-learning
   [ -n "$LOG_DIR" ] || LOG_DIR=${configured_log_dir:-$APP_WORKDIR/logs}
-  [ -n "$APP_URL" ] || APP_URL="http://127.0.0.1:8088/$ACCESS_CODE/api/health"
+  [ -n "$APP_URL" ] || APP_URL="http://127.0.0.1:8088/$ACCESS_CODE/"
 }
 
 ensure_log_config() {
@@ -87,9 +87,10 @@ print_logs() {
 }
 
 health_check() {
+  # /api/health 需登录；部署探针改查服务状态与首页
   deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if curl -fsS --max-time 2 "$APP_URL" >/dev/null 2>&1; then
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null && curl -fsS --max-time 2 "$APP_URL" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
