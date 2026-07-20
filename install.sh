@@ -26,13 +26,39 @@ ask() {
   ANSWER=${ANSWER:-$default}
 }
 
+# 业务 JSON -> SQLite 的迁移格式版本（与 git 提交解耦）
+MIGRATE_SCHEMA=json-to-sqlite:1
+
 [ "$(id -u)" -eq 0 ] || die "请使用 sudo 运行"
+
+mem_total_mb() { awk '/MemTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null || echo 0; }
+swap_total_mb() { awk '/SwapTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null || echo 0; }
+low_memory() { [ "$(mem_total_mb)" -gt 0 ] && [ "$(mem_total_mb)" -le 1536 ]; }
 
 preflight() {
   arch=$(uname -m); free_kb=$(df -Pk /opt 2>/dev/null | awk 'NR==2{print $4}')
   case "$arch" in x86_64|amd64|aarch64|arm64) ;; *) say "提示：未专项验证的架构 $arch" ;; esac
   [ "${free_kb:-0}" -ge 524288 ] || die "/opt 可用磁盘不足 512MB"
-  say "系统 $(uname -s) / $arch，磁盘检查通过"
+  say "系统 $(uname -s) / $arch，内存 $(mem_total_mb)MB / swap $(swap_total_mb)MB，磁盘检查通过"
+}
+
+# 1G 左右机器自动补 1G swap，降低构建/重启被 OOM 的概率
+ensure_swap() {
+  low_memory || return 0
+  [ "$(swap_total_mb)" -ge 512 ] && return 0
+  swapfile=/swapfile-family-learning
+  if [ ! -f "$swapfile" ]; then
+    say "内存偏小，创建 1G swap：$swapfile"
+    # fallocate 在部分文件系统不可用，dd 更稳
+    dd if=/dev/zero of="$swapfile" bs=1M count=1024 status=none
+    chmod 600 "$swapfile"
+    mkswap "$swapfile" >/dev/null
+  fi
+  swapon "$swapfile" 2>/dev/null || true
+  if ! grep -q "$swapfile" /etc/fstab 2>/dev/null; then
+    echo "$swapfile none swap sw 0 0" >>/etc/fstab
+  fi
+  say "当前 swap $(swap_total_mb)MB"
 }
 
 install_packages() {
@@ -122,13 +148,38 @@ fetch_source() {
 }
 
 build_jar() {
-  say "运行测试并构建 JAR"
-  (cd "$SOURCE_DIR" && MAVEN_OPTS='-Xms64m -Xmx384m' mvn --batch-mode test package)
+  # 更新或小内存：停服务腾内存，跳过测试，收紧 Maven 堆
+  if [ "$ACTION" = update ] || low_memory; then
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+      say "临时停止服务以释放内存"
+      systemctl stop "$SERVICE" || true
+    fi
+    say "低内存构建：跳过测试，仅 package（MAVEN_OPTS=-Xmx192m）"
+    (cd "$SOURCE_DIR" && MAVEN_OPTS='-Xms32m -Xmx192m -XX:+UseSerialGC' \
+      mvn --batch-mode -DskipTests package)
+  else
+    say "运行测试并构建 JAR"
+    (cd "$SOURCE_DIR" && MAVEN_OPTS='-Xms64m -Xmx384m' mvn --batch-mode test package)
+  fi
 }
 
 migrate_json() {
+  marker=$DATA_DIR/migration.version
+  install -d -m 750 "$DATA_DIR"
+  if [ -f "$marker" ] && grep -qx "$MIGRATE_SCHEMA" "$marker"; then
+    say "数据迁移已是 $MIGRATE_SCHEMA，跳过"
+    return 0
+  fi
   say "迁移旧 JSON 数据到 SQLite（失败不修改原 JSON）"
   (cd "$SOURCE_DIR" && DATA_DIR="$DATA_DIR" ./scripts/migrate-json.sh)
+  {
+    printf '%s\n' "$MIGRATE_SCHEMA"
+    rev=$(git -C "$SOURCE_DIR" rev-parse --short HEAD 2>/dev/null || true)
+    [ -n "$rev" ] && printf 'git=%s\n' "$rev"
+  } >"$marker"
+  chmod 644 "$marker"
+  chown family-learning:family-learning "$marker" 2>/dev/null || true
+  say "已写入迁移标记 $marker"
 }
 
 install_datasets() {
@@ -293,13 +344,19 @@ EOF
 health_check() {
   # /api/health 需登录；部署探针改查服务状态与首页静态入口
   url="http://127.0.0.1:8088/$ACCESS_CODE/"
+  # 小内存机器启动更慢，多等一会
+  limit=30
+  low_memory && limit=90
   count=0
-  while [ "$count" -lt 30 ]; do
+  while [ "$count" -lt "$limit" ]; do
     if systemctl is-active --quiet "$SERVICE" 2>/dev/null && curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
       return 0
     fi
     count=$((count + 1)); sleep 1
   done
+  say "健康检查未通过（已等待 ${limit}s）：$url"
+  systemctl --no-pager --full status "$SERVICE" 2>/dev/null | head -n 20 || true
+  journalctl -u "$SERVICE" -n 40 --no-pager 2>/dev/null || true
   return 1
 }
 
@@ -321,17 +378,25 @@ uninstall_app() {
 
 case "$ACTION" in
   install)
-    preflight; install_packages; load_or_prompt_config; fetch_source; build_jar; write_env; migrate_json
+    preflight; ensure_swap; install_packages; load_or_prompt_config; fetch_source; build_jar; write_env; migrate_json
     install_service; write_nginx_http; enable_https; configure_firewall
-    health_check || { rollback; die "启动失败，请运行 journalctl -u $SERVICE"; }
+    health_check || { rollback; die "启动失败，请运行：journalctl -u $SERVICE -n 100 --no-pager"; }
     scheme=http; [ "${HTTPS_ACTIVE:-no}" = yes ] && scheme=https
     host=${DOMAIN:-${PUBLIC_IP:-服务器IP}}
     say "安装完成：$scheme://$host/$ACCESS_CODE/"
     say "初始管理员：admin / 123456，请登录后立即修改密码" ;;
   update)
-    [ -f "$ENV_FILE" ] || die "尚未安装"; install_packages; load_or_prompt_config
-    fetch_source; build_jar; write_env; migrate_json; install_service
-    health_check || { rollback; die "更新失败，已尝试回滚"; }
+    [ -f "$ENV_FILE" ] || die "尚未安装"
+    # 先拉最新安装脚本并重进，避免继续执行内存中的旧逻辑
+    if [ "${FL_REEXEC:-}" != 1 ]; then
+      install_packages
+      fetch_source
+      export FL_REEXEC=1
+      exec "$SOURCE_DIR/install.sh" update
+    fi
+    preflight; ensure_swap; install_packages; load_or_prompt_config
+    build_jar; write_env; migrate_json; install_service
+    health_check || { rollback; die "更新失败，已尝试回滚。请查看：journalctl -u $SERVICE -n 100 --no-pager"; }
     say "更新完成" ;;
   uninstall) uninstall_app ;;
   *) die "用法：install.sh {install|update|uninstall}" ;;
