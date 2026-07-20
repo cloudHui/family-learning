@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css?v=20260717-4">
-  <link rel="stylesheet" href="css/features.css?v=20260717-4">
+  <link rel="stylesheet" href="css/app.css?v=20260720-1">
+  <link rel="stylesheet" href="css/features.css?v=20260720-1">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -95,7 +95,11 @@
                 <div class="card-title"><div><h3>写一写</h3><small>用手指或鼠标在田字格中书写</small></div><button @click="clearCanvas">清除</button></div>
                 <div class="canvas-wrap"><canvas ref="writingCanvas" width="520" height="520"></canvas><span v-if="showGuide" class="guide-char">{{ selectedWord.character }}</span></div>
                 <label class="guide-toggle"><input type="checkbox" v-model="showGuide"> 显示描红参考</label>
-                <div class="answer-actions"><button class="success" @click="recordWord(true)">我认识</button><button class="warning" @click="recordWord(false)">还要复习</button></div>
+                <div class="answer-actions">
+                  <button @click="showStrokeFor(selectedWord.character)">看笔顺</button>
+                  <button class="success" @click="recordWord(true)">我认识</button>
+                  <button class="warning" @click="recordWord(false)">还要复习</button>
+                </div>
               </article>
             </div>
           </div>
@@ -187,34 +191,97 @@
         </section>
 
         <section v-else-if="view === 'resources'" class="page-section">
-          <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>开放学习库</h1><p class="muted">查本地资料库；下方才是家庭上传的文件。</p></div></div>
+          <div class="page-heading"><div><p class="eyebrow">资源中心</p><h1>开放学习库</h1><p class="muted">图卡、笔顺、诗词与教材都在这里学；下方才是家庭上传文件。</p></div></div>
           <article class="card library-search">
             <div class="library-types">
               <button v-for="item in libraryTypes" :key="item.id" :class="{active:libraryType===item.id}" @click="selectLibraryType(item.id)">
                 <span>{{ item.icon }}</span>{{ item.name }}
               </button>
             </div>
-            <div class="library-query" v-if="libraryType!=='english'">
+            <div class="library-query" v-if="libraryType!=='textbooks' || textbookMode==='search'">
               <input v-model.trim="libraryQuery" @keyup.enter="searchLibrary" :placeholder="libraryPlaceholder">
               <button class="primary" :disabled="libraryLoading" @click="searchLibrary">{{ libraryLoading?'查询中…':'查询' }}</button>
             </div>
             <p class="muted">{{ libraryHint }}</p>
+            <p v-if="libraryStatusTip" class="library-status">{{ libraryStatusTip }}</p>
             <p v-if="libraryLoading" class="library-status">正在查询本地数据，请稍候…</p>
-            <div class="resource-list" v-else-if="libraryItems.length">
-              <article v-for="item in libraryItems" :key="item.url||item.path||item.word||item.character||item.title">
-                <span>{{ libraryIcon }}</span>
-                <div><h3>{{ libraryTitle(item) }}</h3><small>{{ libraryText(item) }}</small></div>
-                <button v-if="item.url" @click="openLibrary(item)">打开地址</button>
-                <button v-else-if="item.path" @click="openResource(item.path)">打开</button>
-              </article>
-            </div>
-            <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+
+            <template v-else-if="libraryType==='english'">
+              <div v-if="libraryItems.length" class="english-grid">
+                <article v-for="item in libraryItems" :key="item.word" class="english-card" @click="playEnglishCard(item)">
+                  <img v-if="mediaUrls[item.imagePath]" :src="mediaUrls[item.imagePath]" :alt="item.word">
+                  <div v-else class="english-fallback">{{ item.word.charAt(0).toUpperCase() }}</div>
+                  <b>{{ item.word }}</b>
+                  <small>{{ item.audioPath ? '点按听发音' : '暂无音频' }}</small>
+                </article>
+              </div>
+              <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+            </template>
+
+            <template v-else-if="libraryType==='textbooks'">
+              <div class="textbook-toolbar">
+                <button :class="{active:textbookMode==='browse'}" @click="textbookMode='browse';libraryQuery='';loadTextbookTree()">目录浏览</button>
+                <button :class="{active:textbookMode==='search'}" @click="textbookMode='search';libraryItems=[]">搜索</button>
+                <button v-if="textbookMode==='browse' && textbookPrefix" @click="textbookUp()">返回上一级</button>
+              </div>
+              <p v-if="textbookMode==='browse'" class="muted">当前位置：{{ textbookPrefix || '全部教材' }}</p>
+              <div v-if="textbookMode==='browse' && textbookFolders.length" class="folder-grid">
+                <button v-for="folder in textbookFolders" :key="folder" @click="openTextbookFolder(folder)">📁 {{ folder }}</button>
+              </div>
+              <div class="resource-list" v-if="libraryItems.length">
+                <article v-for="item in libraryItems" :key="item.url||item.path">
+                  <span>📕</span>
+                  <div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ item.path }}</small></div>
+                  <button v-if="item.url" @click="openLibrary(item)">打开地址</button>
+                </article>
+              </div>
+              <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+            </template>
+
+            <template v-else-if="libraryType==='character' && strokeData">
+              <div class="stroke-panel">
+                <div class="stroke-head"><b class="stroke-char">{{ strokeData.character }}</b><span>{{ Array.isArray(strokeData.pinyin)?strokeData.pinyin.join(' '):strokeData.pinyin }}</span></div>
+                <canvas ref="strokeCanvas" width="360" height="360" class="stroke-canvas"></canvas>
+                <div class="answer-actions">
+                  <button class="primary" @click="playStrokeAnimation">重播笔顺</button>
+                  <button @click="practiceStrokeCharacter">去语文区练写</button>
+                </div>
+                <p class="muted">{{ strokeData.definition || '本地汉字笔顺' }}</p>
+              </div>
+            </template>
+
+            <template v-else-if="libraryType==='poetry' && poetryDetail">
+              <div class="poetry-card">
+                <button class="text-link" @click="poetryDetail=null">← 返回列表</button>
+                <h2>{{ poetryDetail.title }}</h2>
+                <p class="muted">{{ poetryDetail.author }}</p>
+                <p v-for="(line,idx) in (poetryDetail.paragraphs||[])" :key="idx" class="poetry-line">{{ line }}</p>
+                <div class="answer-actions">
+                  <button class="primary" @click="speak((poetryDetail.paragraphs||[]).join(' '))">朗读</button>
+                  <button @click="recordPoetryRead">记一次阅读</button>
+                </div>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="resource-list" v-if="libraryItems.length">
+                <article v-for="item in libraryItems" :key="item.url||item.path||item.word||item.character||item.title">
+                  <span>{{ libraryIcon }}</span>
+                  <div><h3>{{ libraryTitle(item) }}</h3><small>{{ libraryText(item) }}</small></div>
+                  <button v-if="libraryType==='poetry'" @click="openPoetry(item)">阅读</button>
+                  <button v-else-if="libraryType==='character'" @click="openCharacterResult(item)">看笔顺</button>
+                  <button v-else-if="item.url" @click="openLibrary(item)">打开地址</button>
+                  <button v-else-if="item.path" @click="previewResource(item.path)">预览</button>
+                </article>
+              </div>
+              <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+            </template>
           </article>
           <div class="upload-block">
-            <div class="page-heading compact"><div><p class="eyebrow">本地上传</p><h2>家庭资料夹</h2><p class="muted">仅显示已上传的 PDF / 图片 / 音频，不含诗词库。</p></div><button @click="loadResources">刷新</button></div>
+            <div class="page-heading compact"><div><p class="eyebrow">本地上传</p><h2>家庭资料夹</h2><p class="muted">图片/音频可页内预览，PDF 新开窗口。</p></div><button @click="loadResources">刷新</button></div>
             <div class="resource-folders"><button v-for="folder in resourceFolders" :key="folder.id" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()"><span>{{ folder.icon }}</span>{{ folder.name }}</button></div>
             <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有上传文件</h2><p>管理员上传后会出现在这里。</p></div>
-            <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="openResource(item.path)">打开</button></article></div>
+            <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="previewResource(item.path)">预览</button></article></div>
           </div>
         </section>
 
@@ -229,8 +296,17 @@
       </main>
     </div>
     <div v-if="showPassword" class="modal"><form class="modal-card" @submit.prevent="changePassword"><h2>{{student&&student.mustChangePassword?'首次登录，请设置新密码':'修改密码'}}</h2><p v-if="student&&student.mustChangePassword">修改成功后才能进入学习页面，下次请使用新密码登录。</p><input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" placeholder="原密码" required><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="6" placeholder="新密码（至少6位）" required><input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" required><div class="answer-actions"><button v-if="student&&student.mustChangePassword" type="button" @click="leaveStudent">退出登录</button><button v-else type="button" @click="showPassword=false">取消</button><button class="primary">保存</button></div></form></div>
+    <div v-if="preview" class="modal" @click.self="closePreview">
+      <div class="modal-card preview-card">
+        <div class="card-title"><h2>{{ preview.name }}</h2><button type="button" @click="closePreview">关闭</button></div>
+        <img v-if="preview.kind==='image'" :src="preview.url" :alt="preview.name">
+        <audio v-else-if="preview.kind==='audio'" :src="preview.url" controls autoplay></audio>
+        <video v-else-if="preview.kind==='video'" :src="preview.url" controls autoplay></video>
+        <p v-else class="muted">该类型将在新窗口打开。</p>
+      </div>
+    </div>
   </div>
-  <script src="js/vue.global.prod.js?v=20260717-4"></script>
-  <script src="js/app.js?v=20260717-4"></script>
+  <script src="js/vue.global.prod.js?v=20260720-1"></script>
+  <script src="js/app.js?v=20260720-1"></script>
 </body>
 </html>

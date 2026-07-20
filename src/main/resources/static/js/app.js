@@ -10,15 +10,17 @@ createApp({
       chineseMode:'learn',words:[],selectedWord:null,showGuide:true,dictationWord:null,dictationRevealed:false,canvasDrawing:false,canvasLast:null,
       mathConfig:{max:10,count:10,operation:'mixed'},mathQuestions:[],mathIndex:0,mathAnswer:'',mathCorrect:0,mathFeedback:null,mathLocked:false,mathStartedAt:null,mathFinished:false,
       mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'english',
-      libraryType:'textbooks',libraryQuery:'',libraryItems:[],libraryLoading:false,libraryTip:'',
+      libraryType:'english',libraryQuery:'',libraryItems:[],libraryLoading:false,libraryTip:'',libraryStatusTip:'',
+      textbookMode:'browse',textbookPrefix:'',textbookFolders:[],
+      strokeData:null,poetryDetail:null,mediaUrls:{},preview:null,englishAudio:null,
       printConfig:{max:10,count:20,wordProblems:5,operation:'mixed',showAnswers:false},printQuestions:[],
       subjectName:'',subjectItems:[],
       libraryTypes:[
-        {id:'textbooks',name:'教材目录',icon:'📚'},
+        {id:'english',name:'英语听说',icon:'🎧'},
         {id:'character',name:'汉字笔顺',icon:'✍️'},
-        {id:'dictionary',name:'英汉词典',icon:'🔤'},
         {id:'poetry',name:'古诗词',icon:'📜'},
-        {id:'english',name:'英语听说',icon:'🎧'}
+        {id:'dictionary',name:'英汉词典',icon:'🔤'},
+        {id:'textbooks',name:'教材目录',icon:'📚'}
       ],
       resourceFolders:[
         {id:'english',name:'英语文件',icon:'📗'},
@@ -40,7 +42,7 @@ createApp({
       return {textbooks:'输入年级、科目或书名，如：数学',character:'输入一个汉字，如：学',dictionary:'输入英文单词，如：apple',poetry:'输入篇名或作者，如：静夜思'}[this.libraryType]||'输入查询内容';
     },
     libraryHint(){
-      return {textbooks:'只展示教材链接，不会把 PDF 下载到服务器。',character:'数据来自本地汉字笔顺库。',dictionary:'数据来自本地英汉词典。',poetry:'数据来自本地古诗词库，显示标题、作者和诗句。',english:'儿童英语图片与音频，点「打开」即可听看。'}[this.libraryType]||'';
+      return {textbooks:'可按目录浏览或搜索书名；只打开外部教材链接，不下载 PDF。',character:'输入一个汉字，查看笔顺动画并去语文区练写。',dictionary:'数据来自本地英汉词典。',poetry:'搜索篇名或作者，打开阅读卡可朗读并记学习。',english:'儿童英语图卡：点卡片看图听音。'}[this.libraryType]||'';
     },
     libraryIcon(){return {textbooks:'📚',character:'✍️',dictionary:'🔤',poetry:'📜',english:'🎧'}[this.libraryType]||'📄';}
   },
@@ -49,7 +51,11 @@ createApp({
     if(this.token)try{this.student=await this.api('auth/me');this.afterLogin();}catch(_){this.clearSession();}
     window.addEventListener('error',()=>{if(this.token)this.api('auth/frontend-error',{method:'POST'}).catch(()=>{});});
   },
-  beforeUnmount(){clearInterval(this.heartbeatTimer);},
+  beforeUnmount(){
+    clearInterval(this.heartbeatTimer);
+    this.revokeMediaUrls();
+    if(this.englishAudio){this.englishAudio.pause();this.englishAudio=null;}
+  },
   methods:{
     async api(path,options={}){
       const headers={...(options.headers||{})};if(this.token)headers['X-Session-Token']=this.token;
@@ -113,31 +119,62 @@ createApp({
         this.resourceList=await this.api('resources'+q);
       }catch(error){this.showToast(error.message);}
     },
-    /** 切换开放学习库类型并立即查询（教材/英语可无关键字）。 */
     async selectLibraryType(type){
       this.libraryType=type;
       this.libraryQuery='';
       this.libraryItems=[];
       this.libraryTip='';
+      this.strokeData=null;
+      this.poetryDetail=null;
+      this.textbookPrefix='';
+      this.textbookFolders=[];
+      if(type==='textbooks')this.textbookMode='browse';
+      await this.refreshLibraryStatus();
       await this.searchLibrary();
     },
-    /** 查询本地学习库；缺关键字时给提示，不静默空白。 */
+    async refreshLibraryStatus(){
+      try{
+        const status=await this.api('library/status');
+        const missing=[];
+        if(this.libraryType==='english'&&!status.english)missing.push('儿童英语图卡包');
+        if(this.libraryType==='character'&&!status.characters)missing.push('汉字笔顺包');
+        if(this.libraryType==='dictionary'&&!status.dictionary)missing.push('英汉词典包');
+        if(this.libraryType==='poetry'&&!status.poetry)missing.push('古诗词包');
+        if(this.libraryType==='textbooks'&&!status.textbooks)missing.push('教材目录');
+        this.libraryStatusTip=missing.length?'尚未就绪：'+missing.join('、')+'。请确认安装时已解压 datasets。':'';
+      }catch(_){this.libraryStatusTip='';}
+    },
     async searchLibrary(){
       this.libraryLoading=true;
       this.libraryTip='';
+      this.strokeData=null;
+      this.poetryDetail=null;
       try{
         if(this.libraryType==='english'){
-          this.libraryItems=await this.api('resources?subject=english');
-          if(!this.libraryItems.length)this.libraryTip='暂无英语听说素材。';
+          this.libraryItems=await this.api('library/english'+(this.libraryQuery?('?query='+encodeURIComponent(this.libraryQuery)):''));
+          if(!this.libraryItems.length)this.libraryTip='暂无英语听说图卡，请确认 english-kids 已解压到资源目录。';
+          await this.prefetchEnglishImages();
           return;
         }
-        if(this.libraryType!=='textbooks'&&!this.libraryQuery){
+        if(this.libraryType==='textbooks'){
+          if(this.textbookMode==='browse'&&!this.libraryQuery){await this.loadTextbookTree();return;}
+          this.libraryItems=await this.api('library/textbooks?query='+encodeURIComponent(this.libraryQuery||''));
+          if(!this.libraryItems.length)this.libraryTip='没有找到匹配教材。';
+          return;
+        }
+        if(!this.libraryQuery){
           this.libraryItems=[];
           this.libraryTip='请输入内容后再点查询。例如：'+this.libraryPlaceholder.replace(/^输入/,'').replace(/，.*$/,'');
           return;
         }
         const key=this.libraryType==='character'?'value':'query';
         const data=await this.api(`library/${this.libraryType}?${key}=${encodeURIComponent(this.libraryQuery)}`);
+        if(this.libraryType==='character'){
+          this.strokeData=data;
+          this.libraryItems=[data];
+          await nextTick(()=>this.playStrokeAnimation());
+          return;
+        }
         this.libraryItems=Array.isArray(data)?data:[data];
         if(!this.libraryItems.length)this.libraryTip='没有找到匹配内容，换个词试试。';
       }catch(error){
@@ -148,13 +185,34 @@ createApp({
         this.libraryLoading=false;
       }
     },
+    async loadTextbookTree(){
+      this.libraryLoading=true;this.libraryTip='';
+      try{
+        const data=await this.api('library/textbooks/tree?prefix='+encodeURIComponent(this.textbookPrefix||''));
+        this.textbookFolders=data.folders||[];
+        this.libraryItems=data.books||[];
+        if(!this.textbookFolders.length&&!this.libraryItems.length)this.libraryTip='这个目录下没有教材。';
+      }catch(error){this.libraryTip=error.message;this.showToast(error.message);}
+      finally{this.libraryLoading=false;}
+    },
+    openTextbookFolder(folder){
+      this.textbookPrefix=this.textbookPrefix?`${this.textbookPrefix}/${folder}`:folder;
+      this.loadTextbookTree();
+    },
+    textbookUp(){
+      if(!this.textbookPrefix)return;
+      const parts=this.textbookPrefix.split('/');
+      parts.pop();
+      this.textbookPrefix=parts.join('/');
+      this.loadTextbookTree();
+    },
     libraryTitle(item){
       if(item.title)return item.title+(item.author?' · '+item.author:'');
-      if(item.path&&this.libraryType==='english')return item.path.split('/').pop();
-      return item.path||item.word||item.character||'学习资料';
+      if(item.word)return item.word;
+      return item.path||item.character||'学习资料';
     },
     libraryText(item){
-      if(item.paragraphs)return (item.paragraphs||[]).join(' ');
+      if(item.paragraphs)return (item.paragraphs||[]).slice(0,2).join(' ');
       if(item.translation)return item.translation;
       if(Array.isArray(item.pinyin))return item.pinyin.join(' ');
       if(item.pinyin)return item.pinyin;
@@ -163,6 +221,97 @@ createApp({
       return item.author||'';
     },
     openLibrary(item){if(item.url)window.open(item.url,'_blank','noopener');},
+    openPoetry(item){this.poetryDetail=item;},
+    openCharacterResult(item){this.strokeData=item;nextTick(()=>this.playStrokeAnimation());},
+    async showStrokeFor(character){
+      if(!character)return;
+      this.view='resources';
+      this.libraryType='character';
+      this.libraryQuery=character;
+      this.poetryDetail=null;
+      await this.searchLibrary();
+    },
+    practiceStrokeCharacter(){
+      if(!this.strokeData||!this.strokeData.character)return;
+      this.selectedStage=this.selectedStage||'幼小衔接';
+      this.openView('chinese');
+      this.showToast('可在语文区对照“'+this.strokeData.character+'”练写');
+    },
+    async recordPoetryRead(){
+      if(!this.poetryDetail)return;
+      try{
+        await this.saveRecord('语文','古诗词阅读',1,1,{title:this.poetryDetail.title,author:this.poetryDetail.author});
+        this.showToast('已记录一次诗词阅读');
+      }catch(error){this.showToast(error.message);}
+    },
+    playStrokeAnimation(){
+      const canvas=this.$refs.strokeCanvas;const data=this.strokeData;
+      if(!canvas||!data||!Array.isArray(data.medians))return;
+      const ctx=canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#7357e8';ctx.lineWidth=8;
+      const all=data.medians.flat();
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      all.forEach(p=>{if(!p||p.length<2)return;minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]);});
+      if(!isFinite(minX))return;
+      const pad=30;const scale=Math.min((canvas.width-pad*2)/Math.max(1,maxX-minX),(canvas.height-pad*2)/Math.max(1,maxY-minY));
+      const map=(x,y)=>({x:pad+(x-minX)*scale,y:pad+(y-minY)*scale});
+      let strokeIndex=0,pointIndex=0,drawing=null;
+      const step=()=>{
+        if(strokeIndex>=data.medians.length)return;
+        const stroke=data.medians[strokeIndex]||[];
+        if(pointIndex===0){drawing=null;ctx.beginPath();}
+        if(pointIndex>=stroke.length){strokeIndex++;pointIndex=0;setTimeout(step,180);return;}
+        const p=map(stroke[pointIndex][0],stroke[pointIndex][1]);
+        if(!drawing){ctx.moveTo(p.x,p.y);drawing=p;}
+        else{ctx.lineTo(p.x,p.y);ctx.stroke();ctx.beginPath();ctx.moveTo(p.x,p.y);}
+        pointIndex++;
+        setTimeout(step,16);
+      };
+      step();
+    },
+    async prefetchEnglishImages(){
+      for(const item of this.libraryItems){
+        if(item.imagePath)await this.ensureMediaUrl(item.imagePath);
+      }
+    },
+    async ensureMediaUrl(path){
+      if(!path)return '';
+      if(this.mediaUrls[path])return this.mediaUrls[path];
+      const response=await fetch('api/resources/file?path='+encodeURIComponent(path),{headers:{'X-Session-Token':this.token}});
+      if(!response.ok)throw new Error('资源打开失败');
+      const url=URL.createObjectURL(await response.blob());
+      this.mediaUrls={...this.mediaUrls,[path]:url};
+      return url;
+    },
+    async playEnglishCard(item){
+      try{
+        if(item.imagePath)await this.ensureMediaUrl(item.imagePath);
+        if(item.audioPath){
+          const url=await this.ensureMediaUrl(item.audioPath);
+          if(this.englishAudio){this.englishAudio.pause();}
+          this.englishAudio=new Audio(url);
+          this.englishAudio.play().catch(()=>{});
+        }
+        await this.saveRecord('英语','听说图卡',1,1,{word:item.word});
+      }catch(error){this.showToast(error.message);}
+    },
+    revokeMediaUrls(){
+      Object.values(this.mediaUrls||{}).forEach(url=>{try{URL.revokeObjectURL(url);}catch(_){}});
+      this.mediaUrls={};
+      if(this.preview&&this.preview.url){try{URL.revokeObjectURL(this.preview.url);}catch(_){}}
+      this.preview=null;
+    },
+    async previewResource(path){
+      try{
+        const ext=(path.split('.').pop()||'').toLowerCase();
+        const kind=['png','jpg','jpeg','gif','webp','svg'].includes(ext)?'image':['mp3','wav','ogg'].includes(ext)?'audio':ext==='mp4'?'video':'file';
+        if(kind==='file'){await this.openResource(path);return;}
+        const url=await this.ensureMediaUrl(path);
+        this.preview={name:path.split('/').pop(),kind,url};
+      }catch(error){this.showToast(error.message);}
+    },
+    closePreview(){this.preview=null;},
     async openResource(path){try{const response=await fetch('api/resources/file?path='+encodeURIComponent(path),{headers:{'X-Session-Token':this.token}});if(!response.ok)throw new Error('资源打开失败');const blob=await response.blob();window.open(URL.createObjectURL(blob),'_blank');}catch(error){this.showToast(error.message);}},
     async generatePrintable(){try{this.printQuestions=await this.api(`math/printable?max=${this.printConfig.max}&count=${this.printConfig.count}&operation=${this.printConfig.operation}&wordProblems=${this.printConfig.wordProblems}&stage=${encodeURIComponent(this.selectedStage)}`);}catch(error){this.showToast(error.message);}},
     printWorksheet(){window.print();},

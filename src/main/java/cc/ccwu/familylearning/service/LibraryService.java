@@ -27,10 +27,14 @@ public class LibraryService {
     private static final String TREE = "https://api.github.com/repos/TapXWorld/ChinaTextbook/git/trees/master?recursive=1";
 
     private final Path root;
+    private final Path resourceRoot;
     private final ObjectMapper mapper;
 
-    public LibraryService(@Value("${family-learning.dataset-dir}") String dir, ObjectMapper mapper) {
+    public LibraryService(@Value("${family-learning.dataset-dir}") String dir,
+                          @Value("${family-learning.resource-dir}") String resourceDir,
+                          ObjectMapper mapper) {
         this.root = Paths.get(dir).toAbsolutePath().normalize();
+        this.resourceRoot = Paths.get(resourceDir).toAbsolutePath().normalize();
         this.mapper = mapper;
     }
 
@@ -39,6 +43,88 @@ public class LibraryService {
     public void init() throws IOException {
         Files.createDirectories(root.resolve("characters"));
         Files.createDirectories(root.resolve("dictionary"));
+        Files.createDirectories(englishKidsRoot());
+    }
+
+    /** 数据/资源就绪状态，供前端提示缺包。 */
+    public Map<String, Object> status() throws IOException {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("characters", countFiles(root.resolve("characters"), ".json") > 0);
+        result.put("dictionary", countFiles(root.resolve("dictionary"), ".jsonl") > 0);
+        result.put("poetry", Files.isRegularFile(root.resolve("poetry.jsonl")));
+        result.put("poetryIndex", Files.isDirectory(root.resolve("poetry-idx")));
+        result.put("textbooks", Files.isRegularFile(root.resolve("textbooks.json")));
+        Path kids = englishKidsRoot();
+        result.put("english", Files.isDirectory(kids.resolve("img")) || Files.isDirectory(kids.resolve("audio")));
+        result.put("englishCards", englishKids("").size());
+        return result;
+    }
+
+    /** 儿童英语图卡：匹配 img/ 与 audio/ 同名词条。 */
+    public List<Map<String, Object>> englishKids(String query) throws IOException {
+        Path kids = englishKidsRoot();
+        Path images = kids.resolve("img");
+        Path audios = kids.resolve("audio");
+        if (!Files.isDirectory(images) && !Files.isDirectory(audios)) return Collections.emptyList();
+        String key = clean(query).toLowerCase(Locale.ROOT);
+        Map<String, Map<String, Object>> cards = new TreeMap<>();
+        if (Files.isDirectory(images)) try (Stream<Path> paths = Files.list(images)) {
+            paths.filter(Files::isRegularFile).forEach(path -> {
+                String stem = stem(path.getFileName().toString());
+                if (stem.isEmpty() || isUiAsset(stem)) return;
+                if (!key.isEmpty() && !stem.toLowerCase(Locale.ROOT).contains(key)) return;
+                Map<String, Object> card = cards.computeIfAbsent(stem, this::emptyCard);
+                card.put("imagePath", relativizeResource(path));
+            });
+        }
+        if (Files.isDirectory(audios)) try (Stream<Path> paths = Files.list(audios)) {
+            paths.filter(Files::isRegularFile).forEach(path -> {
+                String stem = stem(path.getFileName().toString());
+                if (stem.isEmpty() || isUiAsset(stem)) return;
+                if (!key.isEmpty() && !stem.toLowerCase(Locale.ROOT).contains(key)) return;
+                Map<String, Object> card = cards.computeIfAbsent(stem, this::emptyCard);
+                card.put("audioPath", relativizeResource(path));
+            });
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> card : cards.values()) {
+            if (card.get("imagePath") == null && card.get("audioPath") == null) continue;
+            result.add(card);
+            if (result.size() >= LIMIT) break;
+        }
+        return result;
+    }
+
+    /** 教材目录树：按路径前缀浏览；有 query 时走搜索。 */
+    public Map<String, Object> textbooksTree(String prefix, String query) throws IOException {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String q = clean(query);
+        if (!q.isEmpty()) {
+            result.put("mode", "search");
+            result.put("items", textbooks(q));
+            return result;
+        }
+        Path cache = root.resolve("textbooks.json");
+        if (!Files.isRegularFile(cache)) refreshTextbooks(cache);
+        String base = normalizePrefix(prefix);
+        Set<String> folders = new TreeSet<>();
+        List<JsonNode> books = new ArrayList<>();
+        for (JsonNode item : mapper.readTree(cache.toFile())) {
+            String path = item.path("path").asText();
+            if (!base.isEmpty() && !path.startsWith(base)) continue;
+            String rest = base.isEmpty() ? path : path.substring(base.length());
+            int slash = rest.indexOf('/');
+            if (slash >= 0) folders.add(rest.substring(0, slash));
+            else if (!rest.isEmpty()) {
+                books.add(item);
+                if (books.size() >= LIMIT) break;
+            }
+        }
+        result.put("mode", "browse");
+        result.put("prefix", base.isEmpty() ? "" : base.substring(0, base.length() - 1));
+        result.put("folders", new ArrayList<>(folders));
+        result.put("books", books);
+        return result;
     }
 
     /** 按单字读取汉字笔顺 JSON。 */
@@ -232,5 +318,52 @@ public class LibraryService {
         if (value == null) return "";
         String text = value.trim();
         return text.substring(0, Math.min(text.length(), 80));
+    }
+
+    private Path englishKidsRoot() {
+        Path nested = resourceRoot.resolve("english").resolve("kids");
+        if (Files.isDirectory(nested)) return nested;
+        Path legacy = resourceRoot.resolve("english").resolve("english-kids");
+        if (Files.isDirectory(legacy)) return legacy;
+        return nested;
+    }
+
+    private Map<String, Object> emptyCard(String word) {
+        Map<String, Object> card = new LinkedHashMap<>();
+        card.put("word", word);
+        card.put("imagePath", null);
+        card.put("audioPath", null);
+        return card;
+    }
+
+    private String relativizeResource(Path path) {
+        return resourceRoot.relativize(path.toAbsolutePath().normalize()).toString().replace('\\', '/');
+    }
+
+    private String stem(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot <= 0 ? name : name.substring(0, dot);
+    }
+
+    private boolean isUiAsset(String stem) {
+        String value = stem.toLowerCase(Locale.ROOT);
+        return "star".equals(value) || "repeat".equals(value) || "success".equals(value)
+                || "error".equals(value) || "screenshot".equals(value) || "educational".equals(value);
+    }
+
+    private String normalizePrefix(String prefix) {
+        String value = prefix == null ? "" : prefix.trim().replace('\\', '/');
+        while (value.startsWith("/")) value = value.substring(1);
+        if (value.isEmpty()) return "";
+        return value.endsWith("/") ? value : value + "/";
+    }
+
+    private long countFiles(Path dir, String suffix) throws IOException {
+        if (!Files.isDirectory(dir)) return 0;
+        try (Stream<Path> paths = Files.list(dir)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(suffix))
+                    .count();
+        }
     }
 }

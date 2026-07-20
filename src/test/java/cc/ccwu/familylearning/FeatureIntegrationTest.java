@@ -2,6 +2,8 @@ package cc.ccwu.familylearning;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -12,9 +14,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -22,13 +28,31 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 class FeatureIntegrationTest {
-    private static final Path ROOT = java.nio.file.Paths.get("/tmp/family-learning-test-" + UUID.randomUUID());
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {
+    private static final Path ROOT = java.nio.file.Paths.get("temp", "test-run").toAbsolutePath().normalize();
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
         registry.add("family-learning.data-dir", () -> ROOT.resolve("data").toString());
         registry.add("family-learning.resource-dir", () -> ROOT.resolve("resources").toString());
         registry.add("family-learning.dataset-dir", () -> ROOT.resolve("datasets").toString());
         registry.add("family-learning.report.recipient", () -> "");
+        registry.add("logging.file.name", () -> ROOT.resolve("logs/test.log").toString());
     }
+
+    @BeforeAll
+    static void prepareTemp() throws Exception {
+        deleteRecursively(ROOT);
+        Files.createDirectories(ROOT.resolve("data"));
+        Files.createDirectories(ROOT.resolve("resources"));
+        Files.createDirectories(ROOT.resolve("datasets"));
+        Files.createDirectories(ROOT.resolve("logs"));
+    }
+
+    @AfterAll
+    static void cleanupTemp() throws Exception {
+        deleteRecursively(ROOT);
+    }
+
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
 
@@ -47,16 +71,27 @@ class FeatureIntegrationTest {
         mvc.perform(get("/api/auth/me").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.username").value("testkid"));
         mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.message").value("请先修改初始密码"));
         changePassword(token,"123456","kidpass");
-        Files.write(ROOT.resolve("datasets/textbooks.json"), "[{\"path\":\"小学/数学.pdf\",\"url\":\"https://github.com/example\"}]".getBytes("UTF-8"));
-        Files.write(ROOT.resolve("datasets/dictionary/te.jsonl"), "{\"word\":\"test\",\"translation\":\"测试\"}\n".getBytes("UTF-8"));
-        Files.write(ROOT.resolve("datasets/characters/5b66.json"), "{\"character\":\"学\",\"pinyin\":\"xué\"}".getBytes("UTF-8"));
+        Files.write(ROOT.resolve("datasets/textbooks.json"), "[{\"path\":\"小学/数学.pdf\",\"url\":\"https://github.com/example\"},{\"path\":\"小学/语文/上册.pdf\",\"url\":\"https://github.com/example/yuwen\"}]".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(ROOT.resolve("datasets/dictionary"));
+        Files.write(ROOT.resolve("datasets/dictionary/te.jsonl"), "{\"word\":\"test\",\"translation\":\"测试\"}\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(ROOT.resolve("datasets/characters"));
+        Files.write(ROOT.resolve("datasets/characters/5b66.json"), "{\"character\":\"学\",\"pinyin\":[\"xué\"],\"strokes\":[\"M0 0\"],\"medians\":[[[10,10],[20,20]]]}".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(ROOT.resolve("resources/english/kids/img"));
+        Files.createDirectories(ROOT.resolve("resources/english/kids/audio"));
+        Files.write(ROOT.resolve("resources/english/kids/img/dog.jpg"), new byte[]{(byte)0xFF,(byte)0xD8,(byte)0xFF,(byte)0xD9});
+        Files.write(ROOT.resolve("resources/english/kids/audio/dog.mp3"), "id3".getBytes(StandardCharsets.UTF_8));
+
         mvc.perform(get("/api/admin/users").header("X-Session-Token", token)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/words").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$[0].character").exists());
         mvc.perform(get("/api/math/questions?max=10&count=5").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5));
         mvc.perform(get("/api/math/printable?max=10&count=5&wordProblems=2&stage=幼小衔接").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(7));
         mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].translation").value("测试"));
-        mvc.perform(get("/api/library/character?value=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.pinyin").value("xué"));
+        mvc.perform(get("/api/library/character?value=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.pinyin[0]").value("xué")).andExpect(jsonPath("$.medians").exists());
         mvc.perform(get("/api/library/textbooks?query=数学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].path").value("小学/数学.pdf"));
+        mvc.perform(get("/api/library/textbooks/tree").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.mode").value("browse")).andExpect(jsonPath("$.folders[0]").value("小学"));
+        mvc.perform(get("/api/library/textbooks/tree?prefix=小学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.books[0].path").value("小学/数学.pdf"));
+        mvc.perform(get("/api/library/english").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].word").value("dog")).andExpect(jsonPath("$[0].imagePath").value("english/kids/img/dog.jpg"));
+        mvc.perform(get("/api/library/status").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.dictionary").value(true)).andExpect(jsonPath("$.english").value(true));
         mvc.perform(get("/api/library/poetry?query=月").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
 
         String record = "{\"subject\":\"数学\",\"module\":\"10以内算术\",\"stage\":\"幼小衔接\",\"total\":5,\"correct\":4,\"durationSeconds\":30}";
@@ -103,7 +138,7 @@ class FeatureIntegrationTest {
         mvc.perform(delete("/api/admin/records/"+userId+"/"+recordNode.get("id").asText()).header("X-Session-Token",admin)).andExpect(status().isOk());
         mvc.perform(delete("/api/admin/mistakes/"+userId+"/"+mistakeNode.get("id").asText()).header("X-Session-Token",admin)).andExpect(status().isOk());
 
-        MockMultipartFile file=new MockMultipartFile("file","exercise.txt","text/plain","hello".getBytes("UTF-8"));
+        MockMultipartFile file=new MockMultipartFile("file","exercise.txt","text/plain","hello".getBytes(StandardCharsets.UTF_8));
         mvc.perform(MockMvcRequestBuilders.multipart("/api/resources").file(file).param("subject","worksheets").header("X-Session-Token",admin)).andExpect(status().isOk());
         mvc.perform(delete("/api/resources").param("path","worksheets/exercise.txt").header("X-Session-Token",admin)).andExpect(status().isOk());
         mvc.perform(get("/api/admin/report/preview").header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.content").exists());
@@ -123,4 +158,16 @@ class FeatureIntegrationTest {
         mvc.perform(post("/api/auth/password").header("X-Session-Token",token).contentType("application/json").content(body)).andExpect(status().isOk());
     }
     private JsonNode json(String value)throws Exception{return mapper.readTree(value);}
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) return;
+        Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.deleteIfExists(file); return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.deleteIfExists(dir); return FileVisitResult.CONTINUE;
+            }
+        });
+    }
 }

@@ -52,7 +52,7 @@ public class ResourceController {
     @GetMapping
     public List<ResourceInfo> list(@RequestHeader(value="X-Session-Token",required=false) String token,
                                    @RequestParam(required = false) String subject) throws Exception {
-        auth.requirePermission(token,"RESOURCES");
+        requireReadAccess(token, subject == null ? "" : subject);
         Path base = subject == null || subject.isEmpty() ? root : safePath(subject);
         if (!Files.isDirectory(base)) return new ArrayList<>();
         List<ResourceInfo> result = new ArrayList<>();
@@ -70,7 +70,7 @@ public class ResourceController {
     public ResponseEntity<FileSystemResource> file(@RequestHeader(value="X-Session-Token",required=false) String token,
                                                     @RequestParam String path,
                                                     @RequestParam(defaultValue = "false") boolean download) throws Exception {
-        auth.requirePermission(token,"RESOURCES");
+        requireReadAccess(token, path);
         Path file = safePath(path);
         if (!Files.isRegularFile(file) || !allowed(file)) throw new IllegalArgumentException("找不到资源文件");
         String type = Files.probeContentType(file);
@@ -101,6 +101,17 @@ public class ResourceController {
     public java.util.Map<String,Object> delete(@RequestHeader("X-Session-Token") String token,@RequestParam String path)throws Exception{
         auth.requireAdmin(token);Path file=safePath(path);if(!Files.deleteIfExists(file))throw new IllegalArgumentException("找不到资源文件");
         return java.util.Collections.<String,Object>singletonMap("message","资源已删除");
+    }
+
+    /** 儿童英语图卡允许 ENGLISH；其余上传资源仍要 RESOURCES。 */
+    private void requireReadAccess(String token, String path) throws Exception {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        if (normalized.startsWith("english/kids") || normalized.startsWith("english/english-kids")
+                || "english".equals(normalized) || normalized.startsWith("english/")) {
+            try { auth.requirePermission(token, "ENGLISH"); return; }
+            catch (SecurityException ignored) { auth.requirePermission(token, "RESOURCES"); return; }
+        }
+        auth.requirePermission(token, "RESOURCES");
     }
 
     private Path safePath(String relative) {
