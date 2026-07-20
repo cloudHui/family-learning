@@ -26,8 +26,17 @@ load_config() {
   fi
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=${configured_access_code#/}
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=family-learning
-  [ -n "$LOG_DIR" ] || LOG_DIR=${configured_log_dir:-/var/log/family-learning}
+  [ -n "$LOG_DIR" ] || LOG_DIR=${configured_log_dir:-$ROOT/logs}
   [ -n "$APP_URL" ] || APP_URL="http://127.0.0.1:8088/$ACCESS_CODE/api/health"
+}
+
+prepare_log_dirs() {
+  for log_dir in "$LOG_DIR" "$ROOT/logs"; do
+    install -d -m 750 "$log_dir"
+    if id family-learning >/dev/null 2>&1; then
+      chown family-learning:family-learning "$log_dir"
+    fi
+  done
 }
 
 show_status() {
@@ -53,12 +62,11 @@ print_logs() {
 }
 
 health_check() {
-  count=0
-  while [ "$count" -lt "$HEALTH_TIMEOUT" ]; do
+  deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
     if curl -fsS --max-time 2 "$APP_URL" >/dev/null 2>&1; then
       return 0
     fi
-    count=$((count + 1))
     sleep 1
   done
   return 1
@@ -86,6 +94,7 @@ rollback() {
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 cd "$ROOT"
 load_config
+prepare_log_dirs
 
 say "拉取远端代码: $REMOTE/$BRANCH"
 git pull --ff-only "$REMOTE" "$BRANCH"
