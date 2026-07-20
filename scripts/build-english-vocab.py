@@ -46,7 +46,7 @@ THEME_WORDS = {
     "家庭": "father mother brother sister baby family home house room kitchen".split(),
     "身体": "hand head eye ear nose mouth foot arm leg hair face".split(),
     "天气": "sun rain snow wind cloud hot cold warm cool weather".split(),
-    "食物": "bread milk rice egg cake water juice meat fish soup noodle".split(),
+    "食物": "bread milk rice egg cake water juice meat fish soup noodles".split(),
 }
 
 KIDS_CATEGORIES = {
