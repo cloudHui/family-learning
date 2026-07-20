@@ -16,6 +16,23 @@ BACKUP="${APP_JAR}.previous"
 
 say() { printf '%s\n' "[family-learning-update] $*"; }
 die() { say "错误：$*" >&2; exit 1; }
+
+git_as_repo_owner() {
+  repo_uid=$(stat -c '%u' "$ROOT")
+  repo_gid=$(stat -c '%g' "$ROOT")
+  if [ "$(id -u)" -eq 0 ] && [ "$repo_uid" -ne 0 ]; then
+    if command -v setpriv >/dev/null 2>&1; then
+      setpriv --reuid "$repo_uid" --regid "$repo_gid" --init-groups -- \
+        git -C "$ROOT" "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -u "#${repo_uid}" -- git -C "$ROOT" "$@"
+    else
+      die "找不到 setpriv 或 sudo，无法以仓库所有者执行 Git"
+    fi
+  else
+    git -C "$ROOT" "$@"
+  fi
+}
 load_config() {
   configured_access_code=
   configured_log_dir=
@@ -125,7 +142,7 @@ prepare_log_dirs
 ensure_service_logging_access
 
 say "拉取远端代码: $REMOTE/$BRANCH"
-git pull --ff-only "$REMOTE" "$BRANCH"
+git_as_repo_owner pull --ff-only "$REMOTE" "$BRANCH"
 say "执行测试并打包"
 MAVEN_OPTS=${MAVEN_OPTS:--Xms64m -Xmx384m} mvn --batch-mode test package
 [ -f target/family-learning.jar ] || die "没有生成 target/family-learning.jar"
