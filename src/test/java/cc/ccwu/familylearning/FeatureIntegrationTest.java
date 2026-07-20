@@ -157,6 +157,11 @@ class FeatureIntegrationTest {
 
         MockMultipartFile file=new MockMultipartFile("file","exercise.txt","text/plain","hello".getBytes(StandardCharsets.UTF_8));
         mvc.perform(MockMvcRequestBuilders.multipart("/api/resources").file(file).param("subject","worksheets").header("X-Session-Token",admin)).andExpect(status().isOk());
+        // 列表不含学习库 kids/vocab；家庭上传仍可见
+        mvc.perform(get("/api/resources?subject=english").header("X-Session-Token", admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(get("/api/resources?subject=worksheets").header("X-Session-Token", admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].path").value("worksheets/exercise.txt"));
         mvc.perform(delete("/api/resources").param("path","worksheets/exercise.txt").header("X-Session-Token",admin)).andExpect(status().isOk());
         mvc.perform(get("/api/admin/report/preview").header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.content").exists());
         mvc.perform(post("/api/admin/report/send").header("X-Session-Token",admin)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("disabled"));

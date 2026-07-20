@@ -49,6 +49,10 @@ public class ResourceController {
         }
     }
 
+    /**
+     * 列出家庭上传文件。
+     * 不含学习库自带包（english/kids、english/vocab 等）；那些只给开放学习库按需取文件。
+     */
     @GetMapping
     public List<ResourceInfo> list(@RequestHeader(value="X-Session-Token",required=false) String token,
                                    @RequestParam(required = false) String subject) throws Exception {
@@ -57,12 +61,20 @@ public class ResourceController {
         if (!Files.isDirectory(base)) return new ArrayList<>();
         List<ResourceInfo> result = new ArrayList<>();
         try (Stream<Path> paths = Files.walk(base, 4)) {
-            paths.filter(Files::isRegularFile).filter(this::allowed).forEach(path -> {
-                try { result.add(new ResourceInfo(root.relativize(path).toString().replace('\\', '/'), Files.size(path), Files.getLastModifiedTime(path).toMillis())); }
-                catch (IOException ignored) {}
-            });
+            paths.filter(Files::isRegularFile)
+                    .filter(this::allowed)
+                    .filter(path -> !isLibraryPack(root.relativize(path).toString().replace('\\', '/')))
+                    .forEach(path -> {
+                        try {
+                            result.add(new ResourceInfo(
+                                    root.relativize(path).toString().replace('\\', '/'),
+                                    Files.size(path),
+                                    Files.getLastModifiedTime(path).toMillis()));
+                        } catch (IOException ignored) { /* skip */ }
+                    });
         }
-        result.sort(Comparator.comparing(item -> item.path));
+        // 最近上传的在前，便于简要展示
+        result.sort(Comparator.comparingLong((ResourceInfo item) -> item.modifiedAt).reversed());
         return result;
     }
 
@@ -119,10 +131,22 @@ public class ResourceController {
         if (!result.startsWith(root)) throw new IllegalArgumentException("非法资源路径");
         return result;
     }
+
     private boolean allowed(Path path) {
         String name = path.getFileName().toString();
         int dot = name.lastIndexOf('.');
         return dot >= 0 && ALLOWED.contains(name.substring(dot + 1).toLowerCase());
+    }
+
+    /** 学习库资源目录：可按路径取文件，但不出现在「家庭资料」列表里。 */
+    private boolean isLibraryPack(String relative) {
+        String path = relative == null ? "" : relative.replace('\\', '/');
+        return path.startsWith("english/kids/")
+                || path.startsWith("english/english-kids/")
+                || path.startsWith("english/vocab/")
+                || path.equals("english/kids")
+                || path.equals("english/english-kids")
+                || path.equals("english/vocab");
     }
 
     public static class ResourceInfo {

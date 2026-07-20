@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css?v=20260720-5">
-  <link rel="stylesheet" href="css/features.css?v=20260720-5">
+  <link rel="stylesheet" href="css/app.css?v=20260720-6">
+  <link rel="stylesheet" href="css/features.css?v=20260720-6">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -324,10 +324,33 @@
             </template>
           </article>
           <div class="upload-block">
-            <div class="page-heading compact"><div><p class="eyebrow">本地上传</p><h2>家庭资料夹</h2><p class="muted">图片/音频可页内预览，PDF 新开窗口。</p></div><button @click="loadResources">刷新</button></div>
-            <div class="resource-folders"><button v-for="folder in resourceFolders" :key="folder.id" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()"><span>{{ folder.icon }}</span>{{ folder.name }}</button></div>
-            <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有上传文件</h2><p>管理员上传后会出现在这里。</p></div>
-            <div v-else class="resource-list"><article v-for="item in resourceList" :key="item.path"><span>{{ fileIcon(item.path) }}</span><div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div><button @click="previewResource(item.path)">预览</button></article></div>
+            <div class="page-heading compact">
+              <div>
+                <p class="eyebrow">本地上传</p>
+                <h2>家庭资料夹</h2>
+                <p class="muted">仅展示家庭上传文件（不含学习库音频包）；完整上传/删除在管理后台。</p>
+              </div>
+              <button @click="loadResources">刷新</button>
+            </div>
+            <div class="resource-folders">
+              <button v-for="folder in resourceFolders" :key="folder.id" :class="{active:resourceSubject===folder.id}" @click="resourceSubject=folder.id;loadResources()">
+                <span>{{ folder.icon }}</span>{{ folder.name }}
+              </button>
+            </div>
+            <div v-if="!resourceList.length" class="empty-state card"><span>📁</span><h2>这个分类还没有上传文件</h2><p>管理员在后台上传后会出现在这里。</p></div>
+            <template v-else>
+              <p class="muted">共 {{ resourceList.length }} 个文件，默认显示最近 {{ Math.min(resourcePreviewLimit, resourceList.length) }} 个。</p>
+              <div class="resource-list">
+                <article v-for="item in visibleResources" :key="item.path">
+                  <span>{{ fileIcon(item.path) }}</span>
+                  <div><h3>{{ item.path.split('/').pop() }}</h3><small>{{ formatSize(item.size) }} · {{ new Date(item.modifiedAt).toLocaleDateString() }}</small></div>
+                  <button @click="previewResource(item.path)">预览</button>
+                </article>
+              </div>
+              <div class="pager" v-if="resourceList.length>resourcePreviewLimit">
+                <button type="button" @click="resourceShowAll=!resourceShowAll">{{ resourceShowAll ? '收起' : '显示全部' }}</button>
+              </div>
+            </template>
           </div>
         </section>
 
@@ -353,6 +376,6 @@
     </div>
   </div>
   <script src="js/vue.global.prod.js?v=20260720-2"></script>
-  <script src="js/app.js?v=20260720-5"></script>
+  <script src="js/app.js?v=20260720-6"></script>
 </body>
 </html>

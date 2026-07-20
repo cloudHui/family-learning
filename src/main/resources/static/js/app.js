@@ -11,7 +11,8 @@ createApp({
       selectedStage:'幼小衔接',stages:['幼小衔接','一年级','二年级','三年级','四年级','五年级','六年级'],
       chineseMode:'learn',words:[],selectedWord:null,showGuide:true,dictationWord:null,dictationRevealed:false,canvasDrawing:false,canvasLast:null,
       mathConfig:{max:10,count:10,operation:'mixed'},mathQuestions:[],mathIndex:0,mathAnswer:'',mathCorrect:0,mathFeedback:null,mathLocked:false,mathStartedAt:null,mathFinished:false,
-      mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'english',
+      mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'',
+      resourceShowAll:false,resourcePreviewLimit:8,
       libraryType:'english',libraryQuery:'',libraryItems:[],libraryLoading:false,libraryTip:'',libraryStatusTip:'',
       libraryTags:[],libraryTag:'',libraryPage:1,libraryPageCount:1,libraryTotal:0,libraryPageSize:24,
       librarySelected:null,librarySelectedIndex:-1,libraryPanelImage:'',
@@ -70,6 +71,11 @@ createApp({
         if(item.id==='character'||item.id==='poetry')return this.hasPerm('CHINESE');
         return this.hasPerm('RESOURCES');
       });
+    },
+    // 前台家庭资料只简要展示最近几条
+    visibleResources(){
+      if(this.resourceShowAll)return this.resourceList;
+      return (this.resourceList||[]).slice(0,this.resourcePreviewLimit);
     }
   },
   async mounted(){
@@ -191,6 +197,7 @@ createApp({
       try{
         const q=this.resourceSubject?'?subject='+encodeURIComponent(this.resourceSubject):'';
         this.resourceList=await this.api('resources'+q);
+        this.resourceShowAll=false;
       }catch(error){this.showToast(error.message);}
     },
     async selectLibraryType(type){
