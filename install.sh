@@ -184,6 +184,15 @@ migrate_json() {
 
 install_datasets() {
   install -d -m 750 "$DATASET_DIR" "$RESOURCE_DIR/english/kids"
+  stamp=$DATASET_DIR/.bundle-stamp
+  bundle_id=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+  if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$bundle_id" ] \
+    && [ -d "$DATASET_DIR/dictionary" ] \
+    && [ -f "$DATASET_DIR/english-vocab/words.jsonl" ] \
+    && [ -d "$RESOURCE_DIR/english/kids" ]; then
+    say "学习数据包未变化（$bundle_id），跳过解压"
+    return 0
+  fi
   if [ -f "$SOURCE_DIR/datasets/characters.tar.gz" ]; then
     rm -rf "$DATASET_DIR/characters"
     tar -xzf "$SOURCE_DIR/datasets/characters.tar.gz" -C "$DATASET_DIR"
@@ -230,6 +239,7 @@ install_datasets() {
     fi
     rm -rf "$tmp_vocab"
   fi
+  printf '%s\n' "$bundle_id" >"$stamp"
   chown -R family-learning:family-learning "$DATA_DIR"
 }
 
@@ -244,10 +254,21 @@ install_service() {
     cp -f "$APP_DIR/family-learning.jar" "$APP_DIR/family-learning.jar.previous"
   fi
   install -m 644 "$SOURCE_DIR/target/family-learning.jar" "$APP_DIR/family-learning.jar"
-  install -m 644 "$SOURCE_DIR/deploy/family-learning.service" /etc/systemd/system/family-learning.service
+  unit=/etc/systemd/system/family-learning.service
+  if low_memory; then
+    say "小内存主机：Java 堆调整为 -Xms32m -Xmx160m"
+    sed -e 's/-Xms64m/-Xms32m/' -e 's/-Xmx256m/-Xmx160m/' \
+      "$SOURCE_DIR/deploy/family-learning.service" >"$unit"
+    chmod 644 "$unit"
+  else
+    install -m 644 "$SOURCE_DIR/deploy/family-learning.service" "$unit"
+  fi
   install -m 755 "$SOURCE_DIR/deploy/family-learning-cli" /usr/local/bin/family-learning
   systemctl daemon-reload
   systemctl enable "$SERVICE"
+  # 尽量回收 page cache，给 JVM 启动腾空间
+  sync
+  echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
   systemctl restart "$SERVICE"
 }
 

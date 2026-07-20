@@ -2,15 +2,33 @@
 set -eu
 
 SERVICE=family-learning.service
-INSTALLER=/opt/family-learning/source/install.sh
+SOURCE=/opt/family-learning/source
+INSTALLER=$SOURCE/install.sh
 
 need_root() { [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"; }
+
+pull_installer() {
+  if [ -d "$SOURCE/.git" ] && command -v git >/dev/null 2>&1; then
+    printf '%s\n' "[family-learning] 拉取最新代码与安装脚本…"
+    git -C "$SOURCE" fetch --depth 1 origin main
+    git -C "$SOURCE" reset --hard origin/main
+  fi
+  if [ -f "$SOURCE/deploy/family-learning-cli" ]; then
+    install -m 755 "$SOURCE/deploy/family-learning-cli" /usr/local/bin/family-learning
+  fi
+}
 
 case "${1:-menu}" in
   start|stop|restart) need_root "$@"; systemctl "$1" "$SERVICE" ;;
   status) systemctl --no-pager --full status "$SERVICE" ;;
   logs) journalctl -u "$SERVICE" -n "${2:-100}" --no-pager ;;
-  update) need_root "$@"; [ -x "$INSTALLER" ] || { echo "找不到安装脚本" >&2; exit 1; }; exec "$INSTALLER" update ;;
+  update)
+    need_root "$@"
+    pull_installer
+    [ -x "$INSTALLER" ] || { echo "找不到安装脚本" >&2; exit 1; }
+    export FL_REEXEC=1
+    exec "$INSTALLER" update
+    ;;
   menu)
     echo "1. 启动  2. 停止  3. 重启  4. 状态  5. 日志  6. 更新"
     printf "请选择: "; read -r choice
