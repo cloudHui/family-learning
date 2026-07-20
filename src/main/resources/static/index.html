@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css?v=20260720-4">
-  <link rel="stylesheet" href="css/features.css?v=20260720-4">
+  <link rel="stylesheet" href="css/app.css?v=20260720-5">
+  <link rel="stylesheet" href="css/features.css?v=20260720-5">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -251,8 +251,9 @@
 
             <!-- 其余库：列表 + 小面板 + 翻页 -->
             <template v-else>
+              <!-- 统一：全部 + 标签；与搜索可叠加 -->
               <div class="tag-row" v-if="libraryTags.length">
-                <button v-if="libraryType!=='dictionary'" type="button" :class="{active:!libraryTag}" @click="selectLibraryTag('')">全部</button>
+                <button type="button" :class="{active:!libraryTag}" @click="selectLibraryTag('')">全部</button>
                 <button type="button" v-for="tag in libraryTags" :key="tag.id" :class="{active:libraryTag===tag.id}" @click="selectLibraryTag(tag.id)">{{ tag.name }}<small v-if="tag.count">{{ tag.count }}</small></button>
               </div>
               <div class="library-split" v-if="libraryItems.length || librarySelected">
@@ -352,6 +353,6 @@
     </div>
   </div>
   <script src="js/vue.global.prod.js?v=20260720-2"></script>
-  <script src="js/app.js?v=20260720-4"></script>
+  <script src="js/app.js?v=20260720-5"></script>
 </body>
 </html>

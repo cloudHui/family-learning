@@ -32,22 +32,23 @@ public class LibraryController {
 
     /**
      * 汉字列表翻页，或按 value 取笔顺详情。
-     * value 有值时返回单个 JSON；否则返回 {items,page,...}。
+     * 列表统一：query 搜索 + tag 标签；value 有值时返回笔顺详情 JSON。
      */
     @GetMapping("/character")
     public Object character(@RequestHeader(value = "X-Session-Token", required = false) String token,
                             @RequestParam(required = false) String value,
                             @RequestParam(defaultValue = "") String query,
+                            @RequestParam(defaultValue = "") String tag,
                             @RequestParam(defaultValue = "1") int page,
                             @RequestParam(defaultValue = "48") int size) throws Exception {
         auth.requirePermission(token, "CHINESE");
         if (value != null && !value.trim().isEmpty()) {
             return library.character(value.trim());
         }
-        return library.characterPage(query, page, size);
+        return library.characterPage(query, tag, page, size);
     }
 
-    /** 英汉词典翻页（字母标签或关键词）。 */
+    /** 英汉词典翻页：统一 query + tag。 */
     @GetMapping("/dictionary")
     public Map<String, Object> dictionary(@RequestHeader(value = "X-Session-Token", required = false) String token,
                                           @RequestParam(defaultValue = "") String query,
@@ -58,7 +59,7 @@ public class LibraryController {
         return library.dictionaryPage(query, tag, page, size);
     }
 
-    /** 古诗词翻页（默认精选，可按作者标签或搜索）。 */
+    /** 古诗词翻页：统一 query + tag。 */
     @GetMapping("/poetry")
     public Map<String, Object> poetry(@RequestHeader(value = "X-Session-Token", required = false) String token,
                                       @RequestParam(defaultValue = "") String query,

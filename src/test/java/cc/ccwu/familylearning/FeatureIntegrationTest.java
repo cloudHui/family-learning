@@ -100,7 +100,8 @@ class FeatureIntegrationTest {
         mvc.perform(get("/api/math/printable?max=10&count=5&wordProblems=2&stage=幼小衔接").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(7));
         mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].translation").value("测试"));
         mvc.perform(get("/api/library/character?value=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.pinyin[0]").value("xué")).andExpect(jsonPath("$.medians").exists());
-        mvc.perform(get("/api/library/character?query=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].character").value("学")).andExpect(jsonPath("$.total").value(1));
+        mvc.perform(get("/api/library/character?query=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].character").value("学")).andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.tags[0].id").value("common"));
+        mvc.perform(get("/api/library/dictionary").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].word").exists()).andExpect(jsonPath("$.tags[0].id").exists());
         mvc.perform(get("/api/library/textbooks?query=数学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].path").value("小学/数学.pdf"));
         mvc.perform(get("/api/library/textbooks/tree").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.mode").value("browse")).andExpect(jsonPath("$.folders[0]").value("小学"));
         mvc.perform(get("/api/library/textbooks/tree?prefix=小学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.books[0].path").value("小学/数学.pdf"));

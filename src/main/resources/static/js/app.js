@@ -53,15 +53,15 @@ createApp({
         vocab:'搜索常用词或中文，如：apple'
       }[this.libraryType]||'输入查询内容';
     },
-    // 各库一句说明：默认可浏览，点中看详情
+    // 各库一句说明：标签筛选 + 搜索，点中看详情
     libraryHint(){
       return {
         textbooks:'目录浏览或搜索书名；只打开外部链接，不下载 PDF。',
-        character:'默认浏览字库；点字看笔顺，可去语文区练写。',
-        dictionary:'按字母浏览或搜索单词；点条目看释义。',
-        poetry:'默认精选诗词；可按作者筛选或搜索篇名。',
-        english:'按主题浏览图卡；点词后在侧栏听发音看图。',
-        vocab:'常用词翻页浏览；点词后在侧栏听美音。'
+        character:'可按「常用」标签或搜索单字；点字看笔顺。',
+        dictionary:'可按字母标签或搜索单词；点条目看释义。',
+        poetry:'默认精选；可按作者标签或搜索篇名。',
+        english:'可按主题标签或搜索；点词后在侧栏听发音看图。',
+        vocab:'可按主题标签或搜索；点词后在侧栏听美音。'
       }[this.libraryType]||'';
     },
     visibleLibraryTypes(){
@@ -205,8 +205,6 @@ createApp({
       this.libraryPageCount=1;
       // 各库默认页大小：汉字密一些，诗词疏一些
       this.libraryPageSize=({vocab:30,dictionary:30,poetry:20,character:48,english:24})[type]||24;
-      // 词典无关键词时按字母浏览，默认 A
-      if(type==='dictionary')this.libraryTag='a';
       this.clearLibrarySelection();
       this.textbookPrefix='';
       this.textbookFolders=[];
