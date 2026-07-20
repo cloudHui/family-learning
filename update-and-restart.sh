@@ -31,6 +31,19 @@ load_config() {
   [ -n "$APP_URL" ] || APP_URL="http://127.0.0.1:8088/$ACCESS_CODE/api/health"
 }
 
+ensure_log_config() {
+  install -d -m 750 /var/log/family-learning
+  if id family-learning >/dev/null 2>&1; then
+    chown family-learning:family-learning /var/log/family-learning
+  fi
+  [ -f "$ENV_FILE" ] || return 0
+  if grep -q '^LOG_DIR=' "$ENV_FILE"; then
+    sed -i 's#^LOG_DIR=.*#LOG_DIR=/var/log/family-learning#' "$ENV_FILE"
+  else
+    printf '%s\n' 'LOG_DIR=/var/log/family-learning' >>"$ENV_FILE"
+  fi
+}
+
 prepare_log_dirs() {
   for log_dir in "$LOG_DIR" "$APP_WORKDIR/logs"; do
     install -d -m 750 "$log_dir"
@@ -94,6 +107,7 @@ rollback() {
 
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 cd "$ROOT"
+ensure_log_config
 load_config
 prepare_log_dirs
 
