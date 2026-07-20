@@ -44,6 +44,17 @@ ensure_log_config() {
   fi
 }
 
+ensure_service_logging_access() {
+  dropin_dir=/etc/systemd/system/$SERVICE.d
+  dropin_file=$dropin_dir/logging.conf
+  install -d -m 755 "$dropin_dir"
+  printf '%s\n' \
+    '[Service]' \
+    'ReadWritePaths=/var/lib/family-learning /var/lib/family-learning/resources /var/lib/family-learning/datasets /var/log/family-learning' \
+    >"$dropin_file"
+  systemctl daemon-reload
+}
+
 prepare_log_dirs() {
   for log_dir in "$LOG_DIR" "$APP_WORKDIR/logs"; do
     install -d -m 750 "$log_dir"
@@ -110,6 +121,7 @@ cd "$ROOT"
 ensure_log_config
 load_config
 prepare_log_dirs
+ensure_service_logging_access
 
 say "拉取远端代码: $REMOTE/$BRANCH"
 git pull --ff-only "$REMOTE" "$BRANCH"
