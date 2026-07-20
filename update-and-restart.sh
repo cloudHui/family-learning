@@ -7,6 +7,7 @@ BRANCH=${BRANCH:-main}
 SERVICE=${SERVICE:-family-learning.service}
 ENV_FILE=${ENV_FILE:-/etc/family-learning/family-learning.env}
 APP_JAR=${APP_JAR:-/opt/family-learning/family-learning.jar}
+APP_WORKDIR=${APP_WORKDIR:-$(dirname "$APP_JAR")}
 LOG_DIR=${LOG_DIR:-}
 ACCESS_CODE=${ACCESS_CODE:-}
 APP_URL=${APP_URL:-}
@@ -26,12 +27,12 @@ load_config() {
   fi
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=${configured_access_code#/}
   [ -n "$ACCESS_CODE" ] || ACCESS_CODE=family-learning
-  [ -n "$LOG_DIR" ] || LOG_DIR=${configured_log_dir:-$ROOT/logs}
+  [ -n "$LOG_DIR" ] || LOG_DIR=${configured_log_dir:-$APP_WORKDIR/logs}
   [ -n "$APP_URL" ] || APP_URL="http://127.0.0.1:8088/$ACCESS_CODE/api/health"
 }
 
 prepare_log_dirs() {
-  for log_dir in "$LOG_DIR" "$ROOT/logs"; do
+  for log_dir in "$LOG_DIR" "$APP_WORKDIR/logs"; do
     install -d -m 750 "$log_dir"
     if id family-learning >/dev/null 2>&1; then
       chown family-learning:family-learning "$log_dir"
@@ -56,7 +57,7 @@ print_logs() {
   say "===== systemd 日志 ====="
   journalctl -u "$SERVICE" -n 1000 --no-pager 2>&1 || true
   print_log_dir "$LOG_DIR"
-  fallback_log_dir="$ROOT/logs"
+  fallback_log_dir="$APP_WORKDIR/logs"
   [ "$fallback_log_dir" = "$LOG_DIR" ] || print_log_dir "$fallback_log_dir"
   [ -d "$LOG_DIR" ] || [ -d "$fallback_log_dir" ] || say "应用日志目录不存在"
 }
