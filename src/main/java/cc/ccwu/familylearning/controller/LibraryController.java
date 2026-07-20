@@ -71,11 +71,25 @@ public class LibraryController {
         return library.textbooksTree(prefix, query);
     }
 
-    /** 儿童英语图卡（图片+音频）。 */
+    /** 儿童英语图卡（图片+音频，支持标签与翻页）。 */
     @GetMapping("/english")
-    public List<Map<String, Object>> english(@RequestHeader(value = "X-Session-Token", required = false) String token,
-                                             @RequestParam(defaultValue = "") String query) throws Exception {
+    public Map<String, Object> english(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                                       @RequestParam(defaultValue = "") String query,
+                                       @RequestParam(defaultValue = "") String tag,
+                                       @RequestParam(defaultValue = "1") int page,
+                                       @RequestParam(defaultValue = "24") int size) throws Exception {
         auth.requirePermission(token, "ENGLISH");
-        return library.englishKids(query);
+        return library.englishKidsPage(query, tag, page, size);
+    }
+
+    /** 常用英语词汇（约 5000，美音，多标签翻页）。 */
+    @GetMapping("/vocab")
+    public Map<String, Object> vocab(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                                     @RequestParam(defaultValue = "") String query,
+                                     @RequestParam(defaultValue = "") String tag,
+                                     @RequestParam(defaultValue = "1") int page,
+                                     @RequestParam(defaultValue = "30") int size) throws Exception {
+        auth.requirePermission(token, "ENGLISH");
+        return library.englishVocabPage(query, tag, page, size);
     }
 }

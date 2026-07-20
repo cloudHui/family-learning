@@ -29,6 +29,7 @@ public class LibraryService {
     private final Path root;
     private final Path resourceRoot;
     private final ObjectMapper mapper;
+    private volatile List<Map<String, Object>> vocabCache;
 
     public LibraryService(@Value("${family-learning.dataset-dir}") String dir,
                           @Value("${family-learning.resource-dir}") String resourceDir,
@@ -56,43 +57,31 @@ public class LibraryService {
         result.put("textbooks", Files.isRegularFile(root.resolve("textbooks.json")));
         Path kids = englishKidsRoot();
         result.put("english", Files.isDirectory(kids.resolve("img")) || Files.isDirectory(kids.resolve("audio")));
-        result.put("englishCards", englishKids("").size());
+        result.put("englishCards", loadKidsCards().size());
+        List<Map<String, Object>> vocab = loadVocab();
+        result.put("vocab", !vocab.isEmpty());
+        result.put("vocabCount", vocab.size());
         return result;
     }
 
-    /** 儿童英语图卡：匹配 img/ 与 audio/ 同名词条。 */
+    /** 儿童英语图卡（兼容旧调用，返回首屏列表）。 */
     public List<Map<String, Object>> englishKids(String query) throws IOException {
-        Path kids = englishKidsRoot();
-        Path images = kids.resolve("img");
-        Path audios = kids.resolve("audio");
-        if (!Files.isDirectory(images) && !Files.isDirectory(audios)) return Collections.emptyList();
-        String key = clean(query).toLowerCase(Locale.ROOT);
-        Map<String, Map<String, Object>> cards = new TreeMap<>();
-        if (Files.isDirectory(images)) try (Stream<Path> paths = Files.list(images)) {
-            paths.filter(Files::isRegularFile).forEach(path -> {
-                String stem = stem(path.getFileName().toString());
-                if (stem.isEmpty() || isUiAsset(stem)) return;
-                if (!key.isEmpty() && !stem.toLowerCase(Locale.ROOT).contains(key)) return;
-                Map<String, Object> card = cards.computeIfAbsent(stem, this::emptyCard);
-                card.put("imagePath", relativizeResource(path));
-            });
-        }
-        if (Files.isDirectory(audios)) try (Stream<Path> paths = Files.list(audios)) {
-            paths.filter(Files::isRegularFile).forEach(path -> {
-                String stem = stem(path.getFileName().toString());
-                if (stem.isEmpty() || isUiAsset(stem)) return;
-                if (!key.isEmpty() && !stem.toLowerCase(Locale.ROOT).contains(key)) return;
-                Map<String, Object> card = cards.computeIfAbsent(stem, this::emptyCard);
-                card.put("audioPath", relativizeResource(path));
-            });
-        }
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Map<String, Object> card : cards.values()) {
-            if (card.get("imagePath") == null && card.get("audioPath") == null) continue;
-            result.add(card);
-            if (result.size() >= LIMIT) break;
-        }
-        return result;
+        Map<String, Object> page = englishKidsPage(query, "", 1, LIMIT);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) page.get("items");
+        return items == null ? Collections.emptyList() : items;
+    }
+
+    /** 儿童英语图卡：分类标签 + 翻页。 */
+    public Map<String, Object> englishKidsPage(String query, String tag, int page, int size) throws IOException {
+        List<Map<String, Object>> all = loadKidsCards();
+        return pageItems(filterTagged(all, query, tag), tagCounts(all), page, size);
+    }
+
+    /** 常用英语词汇（约 5000）：多标签 + 翻页。 */
+    public Map<String, Object> englishVocabPage(String query, String tag, int page, int size) throws IOException {
+        List<Map<String, Object>> all = loadVocab();
+        return pageItems(filterTagged(all, query, tag), tagCounts(all), page, size);
     }
 
     /** 教材目录树：按路径前缀浏览；有 query 时走搜索。 */
@@ -328,11 +317,163 @@ public class LibraryService {
         return nested;
     }
 
+    private List<Map<String, Object>> loadKidsCards() throws IOException {
+        Path kids = englishKidsRoot();
+        Path images = kids.resolve("img");
+        Path audios = kids.resolve("audio");
+        Map<String, List<String>> tagMap = new HashMap<>();
+        Map<String, String> stemMap = new HashMap<>();
+        Path cardsFile = kids.resolve("cards.json");
+        if (Files.isRegularFile(cardsFile)) {
+            JsonNode rootNode = mapper.readTree(cardsFile.toFile());
+            for (JsonNode node : rootNode.path("cards")) {
+                String word = node.path("word").asText("");
+                if (word.isEmpty()) continue;
+                String stem = node.path("stem").asText(word);
+                stemMap.put(word.toLowerCase(Locale.ROOT), stem);
+                List<String> tags = new ArrayList<>();
+                for (JsonNode t : node.path("tags")) tags.add(t.asText());
+                tagMap.put(word.toLowerCase(Locale.ROOT), tags);
+            }
+        }
+        Map<String, Map<String, Object>> cards = new TreeMap<>();
+        if (Files.isDirectory(images)) try (Stream<Path> paths = Files.list(images)) {
+            paths.filter(Files::isRegularFile).forEach(path -> {
+                String fileStem = stem(path.getFileName().toString());
+                if (fileStem.isEmpty() || isUiAsset(fileStem)) return;
+                String word = "fish1".equalsIgnoreCase(fileStem) ? "fish" : fileStem;
+                Map<String, Object> card = cards.computeIfAbsent(word.toLowerCase(Locale.ROOT), key -> emptyCard(word));
+                card.put("imagePath", relativizeResource(path));
+            });
+        }
+        if (Files.isDirectory(audios)) try (Stream<Path> paths = Files.list(audios)) {
+            paths.filter(Files::isRegularFile).forEach(path -> {
+                String fileStem = stem(path.getFileName().toString());
+                if (fileStem.isEmpty() || isUiAsset(fileStem)) return;
+                String word = "fish1".equalsIgnoreCase(fileStem) ? "fish" : fileStem;
+                Map<String, Object> card = cards.computeIfAbsent(word.toLowerCase(Locale.ROOT), key -> emptyCard(word));
+                card.put("audioPath", relativizeResource(path));
+            });
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> card : cards.values()) {
+            if (card.get("imagePath") == null && card.get("audioPath") == null) continue;
+            String word = String.valueOf(card.get("word"));
+            List<String> tags = tagMap.getOrDefault(word.toLowerCase(Locale.ROOT), Collections.singletonList("其他"));
+            card.put("tags", tags);
+            String preferred = stemMap.get(word.toLowerCase(Locale.ROOT));
+            if (preferred != null && Files.isRegularFile(images.resolve(preferred + ".jpg"))) {
+                card.put("imagePath", relativizeResource(images.resolve(preferred + ".jpg")));
+            }
+            result.add(card);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> loadVocab() throws IOException {
+        List<Map<String, Object>> cached = vocabCache;
+        if (cached != null) return cached;
+        synchronized (this) {
+            if (vocabCache != null) return vocabCache;
+            Path file = root.resolve("english-vocab").resolve("words.jsonl");
+            if (!Files.isRegularFile(file)) {
+                vocabCache = Collections.emptyList();
+                return vocabCache;
+            }
+            List<Map<String, Object>> list = new ArrayList<>();
+            try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    JsonNode node = mapper.readTree(line);
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("word", node.path("word").asText());
+                    item.put("phonetic", node.path("phonetic").asText(""));
+                    item.put("translation", node.path("translation").asText(""));
+                    List<String> tags = new ArrayList<>();
+                    for (JsonNode t : node.path("tags")) tags.add(t.asText());
+                    item.put("tags", tags);
+                    String audio = node.path("audioPath").asText("");
+                    item.put("audioPath", audio.isEmpty() ? null : audio);
+                    list.add(item);
+                }
+            }
+            vocabCache = list;
+            return vocabCache;
+        }
+    }
+
+    private List<Map<String, Object>> filterTagged(List<Map<String, Object>> source, String query, String tag) {
+        String key = clean(query).toLowerCase(Locale.ROOT);
+        String tagKey = clean(tag);
+        List<Map<String, Object>> filtered = new ArrayList<>();
+        for (Map<String, Object> item : source) {
+            String word = String.valueOf(item.getOrDefault("word", ""));
+            if (!tagKey.isEmpty()) {
+                @SuppressWarnings("unchecked")
+                List<String> tags = (List<String>) item.getOrDefault("tags", Collections.emptyList());
+                if (tags.stream().noneMatch(t -> tagKey.equals(t))) continue;
+            }
+            if (!key.isEmpty()) {
+                String hay = word.toLowerCase(Locale.ROOT);
+                String translation = String.valueOf(item.getOrDefault("translation", "")).toLowerCase(Locale.ROOT);
+                if (!hay.contains(key) && !translation.contains(key)) continue;
+            }
+            filtered.add(item);
+        }
+        return filtered;
+    }
+
+    private List<Map<String, Object>> tagCounts(List<Map<String, Object>> source) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Map<String, Object> item : source) {
+            @SuppressWarnings("unchecked")
+            List<String> tags = (List<String>) item.getOrDefault("tags", Collections.emptyList());
+            for (String tag : tags) {
+                if (tag.startsWith("字母")) continue; // 字母标签太多，前端用搜索即可
+                counts.merge(tag, 1, Integer::sum);
+            }
+        }
+        List<Map<String, Object>> tags = new ArrayList<>();
+        counts.entrySet().stream()
+                .sorted((a, b) -> {
+                    int byCount = Integer.compare(b.getValue(), a.getValue());
+                    return byCount != 0 ? byCount : a.getKey().compareTo(b.getKey());
+                })
+                .forEach(e -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("id", e.getKey());
+                    row.put("name", e.getKey());
+                    row.put("count", e.getValue());
+                    tags.add(row);
+                });
+        return tags;
+    }
+
+    private Map<String, Object> pageItems(List<Map<String, Object>> filtered, List<Map<String, Object>> tags, int page, int size) {
+        int pageSize = Math.max(1, Math.min(size <= 0 ? 24 : size, 60));
+        int total = filtered.size();
+        int pageCount = Math.max(1, (int) Math.ceil(total / (double) pageSize));
+        int pageNo = Math.max(1, Math.min(page <= 0 ? 1 : page, pageCount));
+        int from = (pageNo - 1) * pageSize;
+        int to = Math.min(total, from + pageSize);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", from >= total ? Collections.emptyList() : filtered.subList(from, to));
+        result.put("total", total);
+        result.put("page", pageNo);
+        result.put("size", pageSize);
+        result.put("pageCount", pageCount);
+        result.put("tags", tags);
+        return result;
+    }
+
     private Map<String, Object> emptyCard(String word) {
         Map<String, Object> card = new LinkedHashMap<>();
         card.put("word", word);
         card.put("imagePath", null);
         card.put("audioPath", null);
+        card.put("tags", Collections.emptyList());
         return card;
     }
 

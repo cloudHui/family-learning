@@ -5,14 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#7357e8">
   <title>成长小课堂</title>
-  <link rel="stylesheet" href="css/app.css?v=20260720-2">
-  <link rel="stylesheet" href="css/features.css?v=20260720-2">
+  <link rel="stylesheet" href="css/app.css?v=20260720-3">
+  <link rel="stylesheet" href="css/features.css?v=20260720-3">
 </head>
 <body>
   <div id="app" v-cloak>
     <div v-if="toast" class="toast">{{ toast }}</div>
 
-    <main v-if="!student" class="welcome-page">
+    <main v-if="authRestoring" class="welcome-page">
+      <section class="welcome-card">
+        <div class="brand-mark">学</div>
+        <p class="eyebrow">家庭学习工具</p>
+        <h1>正在恢复登录</h1>
+        <p class="welcome-tip">请稍候，正在校验会话…</p>
+      </section>
+    </main>
+
+    <main v-else-if="!student" class="welcome-page">
       <section class="welcome-card">
         <div class="brand-mark">学</div>
         <p class="eyebrow">家庭学习工具</p>
@@ -219,8 +228,12 @@
             <p v-if="libraryStatusTip" class="library-status">{{ libraryStatusTip }}</p>
             <p v-if="libraryLoading" class="library-status">正在查询本地数据，请稍候…</p>
 
-            <template v-else-if="libraryType==='english'">
-              <div v-if="libraryItems.length" class="english-grid">
+            <template v-else-if="libraryType==='english' || libraryType==='vocab'">
+              <div class="tag-row" v-if="libraryTags.length">
+                <button type="button" :class="{active:!libraryTag}" @click="selectLibraryTag('')">全部</button>
+                <button type="button" v-for="tag in libraryTags" :key="tag.id" :class="{active:libraryTag===tag.id}" @click="selectLibraryTag(tag.id)">{{ tag.name }}<small>{{ tag.count }}</small></button>
+              </div>
+              <div v-if="libraryType==='english' && libraryItems.length" class="english-grid">
                 <article v-for="item in libraryItems" :key="item.word" class="english-card" @click="playEnglishCard(item)">
                   <img v-if="mediaUrls[item.imagePath]" :src="mediaUrls[item.imagePath]" :alt="item.word">
                   <div v-else class="english-fallback">{{ item.word.charAt(0).toUpperCase() }}</div>
@@ -228,7 +241,23 @@
                   <small>{{ item.audioPath ? '点按听发音' : '暂无音频' }}</small>
                 </article>
               </div>
+              <div v-else-if="libraryType==='vocab' && libraryItems.length" class="vocab-list">
+                <article v-for="item in libraryItems" :key="item.word" class="vocab-row" @click="playEnglishCard(item)">
+                  <div>
+                    <b>{{ item.word }}</b>
+                    <span class="phonetic" v-if="item.phonetic">/{{ item.phonetic }}/</span>
+                    <p>{{ item.translation || '暂无释义' }}</p>
+                    <div class="mini-tags" v-if="item.tags&&item.tags.length"><span v-for="t in item.tags.filter(x=>!String(x).startsWith('字母')).slice(0,4)" :key="t">{{ t }}</span></div>
+                  </div>
+                  <button type="button" class="sound-button">🔊</button>
+                </article>
+              </div>
               <p v-else-if="libraryTip" class="library-status">{{ libraryTip }}</p>
+              <div class="pager" v-if="libraryTotal>0">
+                <button type="button" :disabled="libraryPage<=1||libraryLoading" @click="changeLibraryPage(-1)">上一页</button>
+                <span>第 {{ libraryPage }} / {{ libraryPageCount }} 页 · 共 {{ libraryTotal }} 词</span>
+                <button type="button" :disabled="libraryPage>=libraryPageCount||libraryLoading" @click="changeLibraryPage(1)">下一页</button>
+              </div>
             </template>
 
             <template v-else-if="libraryType==='textbooks'">
@@ -320,6 +349,6 @@
     </div>
   </div>
   <script src="js/vue.global.prod.js?v=20260720-2"></script>
-  <script src="js/app.js?v=20260720-2"></script>
+  <script src="js/app.js?v=20260720-3"></script>
 </body>
 </html>

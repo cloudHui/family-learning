@@ -162,6 +162,23 @@ install_datasets() {
       mv "$RESOURCE_DIR/english/english-kids" "$RESOURCE_DIR/english/kids"
     fi
   fi
+  # 常用英语词汇（词表 + 美音）：分步解压，降低 1G 内存机器峰值
+  if [ -f "$SOURCE_DIR/datasets/english-vocab.tar.gz" ]; then
+    rm -rf "$DATASET_DIR/english-vocab" "$RESOURCE_DIR/english/vocab"
+    install -d -m 750 "$DATASET_DIR/english-vocab" "$RESOURCE_DIR/english/vocab"
+    tmp_vocab=$(mktemp -d)
+    tar -xzf "$SOURCE_DIR/datasets/english-vocab.tar.gz" -C "$tmp_vocab"
+    if [ -f "$tmp_vocab/english-vocab/words.jsonl" ]; then
+      install -m 644 "$tmp_vocab/english-vocab/words.jsonl" "$DATASET_DIR/english-vocab/words.jsonl"
+    fi
+    if [ -f "$tmp_vocab/english-vocab/meta.json" ]; then
+      install -m 644 "$tmp_vocab/english-vocab/meta.json" "$DATASET_DIR/english-vocab/meta.json"
+    fi
+    if [ -d "$tmp_vocab/english-vocab/audio" ]; then
+      cp -a "$tmp_vocab/english-vocab/audio/." "$RESOURCE_DIR/english/vocab/"
+    fi
+    rm -rf "$tmp_vocab"
+  fi
   chown -R family-learning:family-learning "$DATA_DIR"
 }
 
