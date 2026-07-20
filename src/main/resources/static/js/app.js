@@ -14,8 +14,9 @@ createApp({
       mistakeList:[],mistakeSubject:'',recordList:[],resourceList:[],resourceSubject:'english',
       libraryType:'english',libraryQuery:'',libraryItems:[],libraryLoading:false,libraryTip:'',libraryStatusTip:'',
       libraryTags:[],libraryTag:'',libraryPage:1,libraryPageCount:1,libraryTotal:0,libraryPageSize:24,
+      librarySelected:null,librarySelectedIndex:-1,libraryPanelImage:'',
       textbookMode:'browse',textbookPrefix:'',textbookFolders:[],
-      strokeData:null,poetryDetail:null,mediaUrls:{},preview:null,englishAudio:null,
+      strokeData:null,mediaUrls:{},preview:null,englishAudio:null,
       printConfig:{max:10,count:20,wordProblems:5,operation:'mixed',showAnswers:false},printQuestions:[],
       subjectName:'',subjectItems:[],
       libraryTypes:[
@@ -43,12 +44,26 @@ createApp({
     currentMath(){return this.mathQuestions[this.mathIndex]||{};},
     currentFeature(){if(this.view==='chinese')return this.chineseMode==='dictation'?'语文听写':'识字手写';if(this.view==='math')return this.mathQuestions.length&&!this.mathFinished?'算术答题':'数学区';if(this.view==='print')return'题目打印';return'';},
     libraryPlaceholder(){
-      return {textbooks:'输入年级、科目或书名，如：数学',character:'输入一个汉字，如：学',dictionary:'输入英文单词，如：apple',poetry:'输入篇名或作者，如：静夜思',english:'搜索图卡单词，如：dog',vocab:'搜索常用词或中文，如：apple'}[this.libraryType]||'输入查询内容';
+      return {
+        textbooks:'输入年级、科目或书名，如：数学',
+        character:'输入一个汉字，如：学',
+        dictionary:'输入英文单词，如：apple',
+        poetry:'输入篇名或作者，如：静夜思',
+        english:'搜索图卡单词，如：dog',
+        vocab:'搜索常用词或中文，如：apple'
+      }[this.libraryType]||'输入查询内容';
     },
+    // 各库一句说明：默认可浏览，点中看详情
     libraryHint(){
-      return {textbooks:'可按目录浏览或搜索书名；只打开外部教材链接，不下载 PDF。',character:'输入一个汉字，查看笔顺动画并去语文区练写。',dictionary:'数据来自本地英汉词典。',poetry:'搜索篇名或作者，打开阅读卡可朗读并记学习。',english:'儿童英语图卡：可按主题筛选，点卡片看图听音。',vocab:'约 5000 常用词：多标签筛选，点词听美音；无音频时用浏览器朗读。'}[this.libraryType]||'';
+      return {
+        textbooks:'目录浏览或搜索书名；只打开外部链接，不下载 PDF。',
+        character:'默认浏览字库；点字看笔顺，可去语文区练写。',
+        dictionary:'按字母浏览或搜索单词；点条目看释义。',
+        poetry:'默认精选诗词；可按作者筛选或搜索篇名。',
+        english:'按主题浏览图卡；点词后在侧栏听发音看图。',
+        vocab:'常用词翻页浏览；点词后在侧栏听美音。'
+      }[this.libraryType]||'';
     },
-    libraryIcon(){return {textbooks:'📚',character:'✍️',dictionary:'🔤',poetry:'📜',english:'🎧',vocab:'Aa'}[this.libraryType]||'📄';},
     visibleLibraryTypes(){
       return this.libraryTypes.filter(item=>{
         if(item.id==='english'||item.id==='dictionary'||item.id==='vocab')return this.hasPerm('ENGLISH');
@@ -188,9 +203,11 @@ createApp({
       this.libraryTags=[];
       this.libraryTotal=0;
       this.libraryPageCount=1;
-      this.libraryPageSize=(type==='vocab')?30:24;
-      this.strokeData=null;
-      this.poetryDetail=null;
+      // 各库默认页大小：汉字密一些，诗词疏一些
+      this.libraryPageSize=({vocab:30,dictionary:30,poetry:20,character:48,english:24})[type]||24;
+      // 词典无关键词时按字母浏览，默认 A
+      if(type==='dictionary')this.libraryTag='a';
+      this.clearLibrarySelection();
       this.textbookPrefix='';
       this.textbookFolders=[];
       if(type==='textbooks')this.textbookMode='browse';
@@ -205,73 +222,49 @@ createApp({
         if(this.libraryType==='vocab'&&!status.vocab)missing.push('常用单词美音包');
         if(this.libraryType==='character'&&!status.characters)missing.push('汉字笔顺包');
         if(this.libraryType==='dictionary'&&!status.dictionary)missing.push('英汉词典包');
-        if(this.libraryType==='poetry'&&!status.poetry)missing.push('古诗词包');
+        // 诗词精选走内置列表，全库包缺失时仍可浏览精选
+        if(this.libraryType==='poetry'&&!status.poetry)missing.push('古诗词全库（精选仍可用）');
         if(this.libraryType==='textbooks'&&!status.textbooks)missing.push('教材目录');
         this.libraryStatusTip=missing.length?'尚未就绪：'+missing.join('、')+'。请确认安装时已解压 datasets。':'';
       }catch(_){this.libraryStatusTip='';}
     },
+    /** 查询入口：教材走目录树，其余统一翻页列表。 */
     async searchLibrary(){
-      this.libraryLoading=true;
-      this.libraryTip='';
-      this.strokeData=null;
-      this.poetryDetail=null;
-      try{
-        if(this.libraryType==='english'||this.libraryType==='vocab'){
-          await this.loadEnglishPage(1);
-          return;
-        }
-        if(this.libraryType==='textbooks'){
+      this.clearLibrarySelection();
+      if(this.libraryType==='textbooks'){
+        this.libraryLoading=true;this.libraryTip='';
+        try{
           if(this.textbookMode==='browse'&&!this.libraryQuery){await this.loadTextbookTree();return;}
           this.libraryItems=await this.api('library/textbooks?query='+encodeURIComponent(this.libraryQuery||''));
           if(!this.libraryItems.length)this.libraryTip='没有找到匹配教材。';
-          return;
-        }
-        if(!this.libraryQuery){
+        }catch(error){
           this.libraryItems=[];
-          this.libraryTip='请输入内容后再点查询。例如：'+this.libraryPlaceholder.replace(/^输入/,'').replace(/，.*$/,'');
-          return;
-        }
-        const key=this.libraryType==='character'?'value':'query';
-        const data=await this.api(`library/${this.libraryType}?${key}=${encodeURIComponent(this.libraryQuery)}`);
-        if(this.libraryType==='character'){
-          this.strokeData=data;
-          this.libraryItems=[data];
-          await nextTick(()=>this.playStrokeAnimation());
-          return;
-        }
-        this.libraryItems=Array.isArray(data)?data:[data];
-        if(!this.libraryItems.length)this.libraryTip='没有找到匹配内容，换个词试试。';
-      }catch(error){
-        this.libraryItems=[];
-        this.libraryTip=error.message||'查询失败，请稍后再试';
-        this.showToast(error.message);
-      }finally{
-        this.libraryLoading=false;
+          this.libraryTip=error.message||'查询失败，请稍后再试';
+          this.showToast(error.message);
+        }finally{this.libraryLoading=false;}
+        return;
       }
+      await this.loadLibraryPage(1);
     },
-    async loadEnglishPage(page){
+    /** 统一翻页加载（英语/词汇/词典/诗词/汉字）。 */
+    async loadLibraryPage(page){
       this.libraryLoading=true;this.libraryTip='';
+      this.clearLibrarySelection();
       try{
-        const path=this.libraryType==='vocab'?'library/vocab':'library/english';
         const q=new URLSearchParams({
           query:this.libraryQuery||'',
           tag:this.libraryTag||'',
           page:String(page||1),
           size:String(this.libraryPageSize||24)
         });
-        const data=await this.api(path+'?'+q.toString());
+        const data=await this.api('library/'+this.libraryType+'?'+q.toString());
         this.libraryItems=data.items||[];
         this.libraryTags=data.tags||[];
         this.libraryPage=data.page||1;
         this.libraryPageCount=data.pageCount||1;
         this.libraryTotal=data.total||0;
         this.libraryPageSize=data.size||this.libraryPageSize;
-        if(!this.libraryItems.length){
-          this.libraryTip=this.libraryType==='vocab'
-            ?'暂无常用单词，请确认 english-vocab 已解压到数据目录。'
-            :'暂无英语图卡，请确认 english-kids 已解压到资源目录。';
-        }
-        if(this.libraryType==='english')await this.prefetchEnglishImages();
+        if(!this.libraryItems.length)this.libraryTip='没有内容，换个筛选或关键词试试。';
       }catch(error){
         this.libraryItems=[];
         this.libraryTip=error.message||'查询失败，请稍后再试';
@@ -279,13 +272,62 @@ createApp({
       }finally{this.libraryLoading=false;}
     },
     selectLibraryTag(tag){
-      this.libraryTag=(this.libraryTag===tag)?'':tag;
-      this.loadEnglishPage(1);
+      this.libraryTag=this.libraryTag===tag?'':tag;
+      this.loadLibraryPage(1);
     },
     changeLibraryPage(delta){
       const next=this.libraryPage+delta;
       if(next<1||next>this.libraryPageCount)return;
-      this.loadEnglishPage(next);
+      this.loadLibraryPage(next);
+    },
+    clearLibrarySelection(){
+      this.librarySelected=null;
+      this.librarySelectedIndex=-1;
+      this.libraryPanelImage='';
+      this.strokeData=null;
+      if(this.englishAudio){this.englishAudio.pause();this.englishAudio=null;}
+    },
+    libraryItemKey(item,index){
+      return item.word||item.character||item.title||item.path||index;
+    },
+    /** 点列表：只选中，不自动播音频/动画。 */
+    async selectLibraryItem(index){
+      if(index<0||index>=this.libraryItems.length)return;
+      this.librarySelectedIndex=index;
+      this.librarySelected=this.libraryItems[index];
+      this.libraryPanelImage='';
+      this.strokeData=null;
+      if(this.libraryType==='character'){
+        try{
+          this.strokeData=await this.api('library/character?value='+encodeURIComponent(this.librarySelected.character));
+          await nextTick(()=>this.playStrokeAnimation());
+        }catch(error){this.showToast(error.message);}
+        return;
+      }
+      if((this.libraryType==='english'||this.libraryType==='vocab')&&this.librarySelected.imagePath){
+        try{this.libraryPanelImage=await this.ensureMediaUrl(this.librarySelected.imagePath);}catch(_){this.libraryPanelImage='';}
+      }
+    },
+    shiftLibraryItem(delta){
+      const next=this.librarySelectedIndex+delta;
+      if(next<0||next>=this.libraryItems.length)return;
+      this.selectLibraryItem(next);
+    },
+    /** 侧栏手动点播；无音频时用浏览器朗读。 */
+    async playSelectedAudio(){
+      const item=this.librarySelected;
+      if(!item||!item.word)return;
+      try{
+        if(item.audioPath){
+          const url=await this.ensureMediaUrl(item.audioPath);
+          if(this.englishAudio)this.englishAudio.pause();
+          this.englishAudio=new Audio(url);
+          this.englishAudio.play().catch(()=>this.showToast('音频播放被浏览器拦截，请再点一次'));
+        }else{
+          this.speakEnglish(item.word);
+        }
+        await this.saveRecord('英语',this.libraryType==='vocab'?'常用单词':'听说图卡',1,1,{word:item.word});
+      }catch(error){this.showToast(error.message);}
     },
     async loadTextbookTree(){
       this.libraryLoading=true;this.libraryTip='';
@@ -314,7 +356,7 @@ createApp({
       return item.path||item.character||'学习资料';
     },
     libraryText(item){
-      if(item.paragraphs)return (item.paragraphs||[]).slice(0,2).join(' ');
+      if(item.paragraphs)return (item.paragraphs||[]).slice(0,1).join(' ');
       if(item.translation)return item.translation;
       if(Array.isArray(item.pinyin))return item.pinyin.join(' ');
       if(item.pinyin)return item.pinyin;
@@ -323,26 +365,26 @@ createApp({
       return item.author||'';
     },
     openLibrary(item){if(item.url)window.open(item.url,'_blank','noopener');},
-    openPoetry(item){this.poetryDetail=item;},
-    openCharacterResult(item){this.strokeData=item;nextTick(()=>this.playStrokeAnimation());},
     async showStrokeFor(character){
       if(!character)return;
       this.view='resources';
       this.libraryType='character';
       this.libraryQuery=character;
-      this.poetryDetail=null;
+      this.libraryTag='';
       await this.searchLibrary();
+      if(this.libraryItems.length)await this.selectLibraryItem(0);
     },
     practiceStrokeCharacter(){
-      if(!this.strokeData||!this.strokeData.character)return;
+      const ch=(this.strokeData&&this.strokeData.character)||(this.librarySelected&&this.librarySelected.character);
+      if(!ch)return;
       this.selectedStage=this.selectedStage||'幼小衔接';
       this.openView('chinese');
-      this.showToast('可在语文区对照“'+this.strokeData.character+'”练写');
+      this.showToast('可在语文区对照“'+ch+'”练写');
     },
     async recordPoetryRead(){
-      if(!this.poetryDetail)return;
+      if(!this.librarySelected||this.libraryType!=='poetry')return;
       try{
-        await this.saveRecord('语文','古诗词阅读',1,1,{title:this.poetryDetail.title,author:this.poetryDetail.author});
+        await this.saveRecord('语文','古诗词阅读',1,1,{title:this.librarySelected.title,author:this.librarySelected.author});
         this.showToast('已记录一次诗词阅读');
       }catch(error){this.showToast(error.message);}
     },
@@ -373,12 +415,6 @@ createApp({
       };
       step();
     },
-    async prefetchEnglishImages(){
-      for(const item of this.libraryItems){
-        if(!item.imagePath)continue;
-        try{await this.ensureMediaUrl(item.imagePath);}catch(_){/* 单卡预取失败不阻断列表 */}
-      }
-    },
     async ensureMediaUrl(path){
       if(!path)return '';
       if(this.mediaUrls[path])return this.mediaUrls[path];
@@ -393,20 +429,6 @@ createApp({
       const url=URL.createObjectURL(await response.blob());
       this.mediaUrls={...this.mediaUrls,[path]:url};
       return url;
-    },
-    async playEnglishCard(item){
-      try{
-        if(item.imagePath)await this.ensureMediaUrl(item.imagePath);
-        if(item.audioPath){
-          const url=await this.ensureMediaUrl(item.audioPath);
-          if(this.englishAudio){this.englishAudio.pause();}
-          this.englishAudio=new Audio(url);
-          this.englishAudio.play().catch(()=>this.showToast('音频播放被浏览器拦截，请再点一次'));
-        }else if(item.word){
-          this.speakEnglish(item.word);
-        }
-        await this.saveRecord('英语',this.libraryType==='vocab'?'常用单词':'听说图卡',1,1,{word:item.word});
-      }catch(error){this.showToast(error.message);}
     },
     speakEnglish(text){
       if(!('speechSynthesis'in window)){this.showToast('当前浏览器不支持英语朗读');return;}

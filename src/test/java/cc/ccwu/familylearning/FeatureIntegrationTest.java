@@ -98,15 +98,17 @@ class FeatureIntegrationTest {
         mvc.perform(get("/api/admin/users").header("X-Session-Token", token)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/math/questions?max=10&count=5").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5));
         mvc.perform(get("/api/math/printable?max=10&count=5&wordProblems=2&stage=幼小衔接").header("X-Session-Token", token)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(7));
-        mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].translation").value("测试"));
+        mvc.perform(get("/api/library/dictionary?query=test").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].translation").value("测试"));
         mvc.perform(get("/api/library/character?value=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.pinyin[0]").value("xué")).andExpect(jsonPath("$.medians").exists());
+        mvc.perform(get("/api/library/character?query=学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].character").value("学")).andExpect(jsonPath("$.total").value(1));
         mvc.perform(get("/api/library/textbooks?query=数学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].path").value("小学/数学.pdf"));
         mvc.perform(get("/api/library/textbooks/tree").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.mode").value("browse")).andExpect(jsonPath("$.folders[0]").value("小学"));
         mvc.perform(get("/api/library/textbooks/tree?prefix=小学").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.books[0].path").value("小学/数学.pdf"));
         mvc.perform(get("/api/library/english").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].word").value("dog")).andExpect(jsonPath("$.items[0].imagePath").value("english/kids/img/dog.jpg")).andExpect(jsonPath("$.tags[0].name").value("动物"));
         mvc.perform(get("/api/library/vocab?tag=水果").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].word").value("apple")).andExpect(jsonPath("$.total").value(1));
         mvc.perform(get("/api/library/status").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.dictionary").value(true)).andExpect(jsonPath("$.english").value(true)).andExpect(jsonPath("$.vocab").value(true));
-        mvc.perform(get("/api/library/poetry?query=月").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(get("/api/library/poetry").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].title").exists()).andExpect(jsonPath("$.page").value(1));
+        mvc.perform(get("/api/library/poetry?query=月").header("X-Session-Token", admin)).andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
 
         String record = "{\"subject\":\"数学\",\"module\":\"10以内算术\",\"stage\":\"幼小衔接\",\"total\":5,\"correct\":4,\"durationSeconds\":30}";
         JsonNode recordNode = json(mvc.perform(post("/api/records").header("X-Session-Token",token).contentType("application/json").content(record)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());

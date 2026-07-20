@@ -18,8 +18,8 @@ import java.util.*;
 import java.util.stream.Stream;
 
 /**
- * 开放学习库：读取本地 datasets，提供教材/汉字/词典/诗词查询。
- * 诗词优先走轻量索引，避免每次扫整库。
+ * 开放学习库：本地 datasets 查询。
+ * 列表类接口统一返回翻页结构；详情（笔顺动画等）按需再取。
  */
 @Service
 public class LibraryService {
@@ -30,6 +30,10 @@ public class LibraryService {
     private final Path resourceRoot;
     private final ObjectMapper mapper;
     private volatile List<Map<String, Object>> vocabCache;
+    /** 汉字列表缓存：文件名十六进制码点 -> 字符。 */
+    private volatile List<String> characterCache;
+    /** 精选诗词缓存（默认浏览，避免扫 30 万首全库）。 */
+    private volatile List<JsonNode> featuredPoetryCache;
 
     public LibraryService(@Value("${family-learning.dataset-dir}") String dir,
                           @Value("${family-learning.resource-dir}") String resourceDir,
@@ -116,7 +120,7 @@ public class LibraryService {
         return result;
     }
 
-    /** 按单字读取汉字笔顺 JSON。 */
+    /** 按单字读取汉字笔顺详情（含笔画轨迹）。 */
     public JsonNode character(String value) throws IOException {
         if (value == null || value.codePointCount(0, value.length()) != 1) {
             throw new IllegalArgumentException("请输入一个汉字");
@@ -126,18 +130,76 @@ public class LibraryService {
         return mapper.readTree(file.toFile());
     }
 
-    /** 按词头分片查找英汉词典。 */
-    public List<JsonNode> dictionary(String query) throws IOException {
+    /** 汉字浏览/搜索翻页；列表只给字头，笔顺详情另调 character。 */
+    public Map<String, Object> characterPage(String query, int page, int size) throws IOException {
+        String key = clean(query);
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (!key.isEmpty()) {
+            if (key.codePointCount(0, key.length()) != 1) {
+                throw new IllegalArgumentException("请输入一个汉字");
+            }
+            try {
+                JsonNode node = character(key);
+                items.add(lightCharacter(node));
+            } catch (IllegalArgumentException ignored) {
+                // 字库没有则空列表
+            }
+            return pageNodes(items, Collections.emptyList(), page, size);
+        }
+        for (String ch : loadCharacters()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("character", ch);
+            items.add(row);
+        }
+        return pageNodes(items, Collections.emptyList(), page, size);
+    }
+
+    /** 英汉词典翻页：无关键词时按词头字母浏览，有关键词时搜分片。 */
+    public Map<String, Object> dictionaryPage(String query, String tag, int page, int size) throws IOException {
         String word = clean(query).toLowerCase(Locale.ROOT);
-        if (word.isEmpty()) return Collections.emptyList();
-        String shard = word.substring(0, Math.min(2, word.length())).replaceAll("[^a-z]", "_");
-        return searchJsonl(root.resolve("dictionary").resolve(shard + ".jsonl"), word, "word");
+        String letter = clean(tag).toLowerCase(Locale.ROOT);
+        List<Map<String, Object>> tags = dictionaryLetterTags();
+        if (!word.isEmpty()) {
+            String shard = word.substring(0, Math.min(2, word.length())).replaceAll("[^a-z]", "_");
+            List<JsonNode> hits = searchJsonl(root.resolve("dictionary").resolve(shard + ".jsonl"), word, "word");
+            return pageNodes(toDictRows(hits), tags, page, size);
+        }
+        // 默认进 A，避免无筛选扫全库
+        if (letter.isEmpty()) letter = "a";
+        if (letter.length() > 1) letter = letter.substring(0, 1);
+        List<JsonNode> rows = readDictionaryLetter(letter);
+        return pageNodes(toDictRows(rows), tags, page, size);
+    }
+
+    /** 兼容旧调用：按词查询词典。 */
+    public List<JsonNode> dictionary(String query) throws IOException {
+        Map<String, Object> page = dictionaryPage(query, "", 1, LIMIT);
+        return castItems(page);
     }
 
     /**
-     * 查古诗词。
-     * 优先读 poetry-idx 分片（按标题/作者首字），再按偏移取全文；否则回退扫 poetry.jsonl。
+     * 古诗词翻页：默认精选；可按作者标签或标题/作者搜索。
+     * 全库检索仍走索引分片，不扫 JSONL。
      */
+    public Map<String, Object> poetryPage(String query, String tag, int page, int size) throws IOException {
+        String key = clean(query);
+        String author = clean(tag);
+        List<JsonNode> source;
+        if (!key.isEmpty()) {
+            source = poetry(key);
+        } else if (!author.isEmpty()) {
+            source = filterPoetryByAuthor(loadFeaturedPoetry(), author);
+            if (source.isEmpty()) source = poetry(author);
+        } else {
+            source = loadFeaturedPoetry();
+        }
+        List<Map<String, Object>> tags = poetryAuthorTags(loadFeaturedPoetry());
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (JsonNode node : source) rows.add(lightPoetry(node));
+        return pageNodes(rows, tags, page, size);
+    }
+
+    /** 兼容旧调用：按关键词查诗词。 */
     public List<JsonNode> poetry(String query) throws IOException {
         String key = clean(query);
         if (key.isEmpty()) return Collections.emptyList();
@@ -452,6 +514,11 @@ public class LibraryService {
     }
 
     private Map<String, Object> pageItems(List<Map<String, Object>> filtered, List<Map<String, Object>> tags, int page, int size) {
+        return pageNodes(filtered, tags, page, size);
+    }
+
+    /** 统一翻页响应：items/total/page/size/pageCount/tags。 */
+    private Map<String, Object> pageNodes(List<Map<String, Object>> filtered, List<Map<String, Object>> tags, int page, int size) {
         int pageSize = Math.max(1, Math.min(size <= 0 ? 24 : size, 60));
         int total = filtered.size();
         int pageCount = Math.max(1, (int) Math.ceil(total / (double) pageSize));
@@ -464,8 +531,205 @@ public class LibraryService {
         result.put("page", pageNo);
         result.put("size", pageSize);
         result.put("pageCount", pageCount);
-        result.put("tags", tags);
+        result.put("tags", tags == null ? Collections.emptyList() : tags);
         return result;
+    }
+
+    /** 缓存汉字字头列表（由文件名码点还原，不读 JSON）。 */
+    private List<String> loadCharacters() throws IOException {
+        List<String> cached = characterCache;
+        if (cached != null) return cached;
+        synchronized (this) {
+            if (characterCache != null) return characterCache;
+            Path dir = root.resolve("characters");
+            if (!Files.isDirectory(dir)) {
+                characterCache = Collections.emptyList();
+                return characterCache;
+            }
+            List<String> list = new ArrayList<>();
+            try (Stream<Path> paths = Files.list(dir)) {
+                paths.filter(Files::isRegularFile)
+                        .map(path -> path.getFileName().toString())
+                        .filter(name -> name.endsWith(".json"))
+                        .sorted()
+                        .forEach(name -> {
+                            try {
+                                int cp = Integer.parseInt(name.substring(0, name.length() - 5), 16);
+                                list.add(new String(Character.toChars(cp)));
+                            } catch (Exception ignored) { /* 跳过坏文件名 */ }
+                        });
+            }
+            characterCache = list;
+            return characterCache;
+        }
+    }
+
+    private Map<String, Object> lightCharacter(JsonNode node) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("character", node.path("character").asText());
+        if (node.path("pinyin").isArray()) {
+            List<String> py = new ArrayList<>();
+            node.path("pinyin").forEach(p -> py.add(p.asText()));
+            row.put("pinyin", py);
+        } else if (node.has("pinyin")) {
+            row.put("pinyin", node.path("pinyin").asText());
+        }
+        return row;
+    }
+
+    private List<Map<String, Object>> toDictRows(List<JsonNode> nodes) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (JsonNode node : nodes) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("word", node.path("word").asText());
+            row.put("phonetic", node.path("phonetic").asText(""));
+            row.put("translation", node.path("translation").asText(node.path("definition").asText("")));
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /** 词典字母标签：有数据的 a-z。 */
+    private List<Map<String, Object>> dictionaryLetterTags() throws IOException {
+        Path dir = root.resolve("dictionary");
+        Set<String> letters = new TreeSet<>();
+        if (Files.isDirectory(dir)) {
+            try (Stream<Path> paths = Files.list(dir)) {
+                paths.filter(Files::isRegularFile)
+                        .map(path -> path.getFileName().toString())
+                        .filter(name -> name.endsWith(".jsonl") && !name.isEmpty())
+                        .forEach(name -> {
+                            char c = Character.toLowerCase(name.charAt(0));
+                            if (c >= 'a' && c <= 'z') letters.add(String.valueOf(c));
+                        });
+            }
+        }
+        List<Map<String, Object>> tags = new ArrayList<>();
+        for (String letter : letters) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", letter);
+            row.put("name", letter.toUpperCase(Locale.ROOT));
+            tags.add(row);
+        }
+        return tags;
+    }
+
+    /** 读取某一字母开头的词典分片（最多合并 LIMIT*4 条供翻页）。 */
+    private List<JsonNode> readDictionaryLetter(String letter) throws IOException {
+        Path dir = root.resolve("dictionary");
+        if (!Files.isDirectory(dir)) return Collections.emptyList();
+        List<Path> shards = new ArrayList<>();
+        try (Stream<Path> paths = Files.list(dir)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                        return name.endsWith(".jsonl") && name.startsWith(letter);
+                    })
+                    .sorted()
+                    .forEach(shards::add);
+        }
+        List<JsonNode> rows = new ArrayList<>();
+        int cap = 240; // 单字母浏览上限，控制内存
+        for (Path shard : shards) {
+            try (BufferedReader reader = Files.newBufferedReader(shard, StandardCharsets.UTF_8)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    try { rows.add(mapper.readTree(line)); } catch (Exception ignored) { continue; }
+                    if (rows.size() >= cap) return rows;
+                }
+            }
+        }
+        return rows;
+    }
+
+    private List<JsonNode> loadFeaturedPoetry() throws IOException {
+        List<JsonNode> cached = featuredPoetryCache;
+        if (cached != null) return cached;
+        synchronized (this) {
+            if (featuredPoetryCache != null) return featuredPoetryCache;
+            List<JsonNode> list = new ArrayList<>();
+            Path local = root.resolve("poetry-featured.jsonl");
+            if (Files.isRegularFile(local)) {
+                try (BufferedReader reader = Files.newBufferedReader(local, StandardCharsets.UTF_8)) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        line = line.trim();
+                        if (line.isEmpty()) continue;
+                        try { list.add(mapper.readTree(line)); } catch (Exception ignored) { /* skip */ }
+                    }
+                }
+            }
+            if (list.isEmpty()) {
+                try (InputStream in = LibraryService.class.getResourceAsStream("/library/poetry-featured.jsonl")) {
+                    if (in != null) {
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                line = line.trim();
+                                if (line.isEmpty()) continue;
+                                try { list.add(mapper.readTree(line)); } catch (Exception ignored) { /* skip */ }
+                            }
+                        }
+                    }
+                }
+            }
+            featuredPoetryCache = list;
+            return featuredPoetryCache;
+        }
+    }
+
+    private List<JsonNode> filterPoetryByAuthor(List<JsonNode> source, String author) {
+        String key = author.toLowerCase(Locale.ROOT);
+        List<JsonNode> rows = new ArrayList<>();
+        for (JsonNode node : source) {
+            if (node.path("author").asText("").toLowerCase(Locale.ROOT).contains(key)) rows.add(node);
+        }
+        return rows;
+    }
+
+    private List<Map<String, Object>> poetryAuthorTags(List<JsonNode> source) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (JsonNode node : source) {
+            String author = node.path("author").asText("").trim();
+            if (author.isEmpty()) continue;
+            counts.merge(author, 1, Integer::sum);
+        }
+        List<Map<String, Object>> tags = new ArrayList<>();
+        counts.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+                .limit(12)
+                .forEach(e -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("id", e.getKey());
+                    row.put("name", e.getKey());
+                    row.put("count", e.getValue());
+                    tags.add(row);
+                });
+        return tags;
+    }
+
+    private Map<String, Object> lightPoetry(JsonNode node) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("title", node.path("title").asText());
+        row.put("author", node.path("author").asText(""));
+        List<String> paragraphs = new ArrayList<>();
+        if (node.path("paragraphs").isArray()) {
+            node.path("paragraphs").forEach(p -> paragraphs.add(p.asText()));
+        }
+        row.put("paragraphs", paragraphs);
+        return row;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<JsonNode> castItems(Map<String, Object> page) {
+        Object items = page.get("items");
+        if (!(items instanceof List)) return Collections.emptyList();
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) items;
+        List<JsonNode> nodes = new ArrayList<>();
+        for (Map<String, Object> row : rows) nodes.add(mapper.valueToTree(row));
+        return nodes;
     }
 
     private Map<String, Object> emptyCard(String word) {

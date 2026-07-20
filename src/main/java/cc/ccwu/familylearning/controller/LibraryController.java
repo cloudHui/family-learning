@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 开放学习库接口：教材、汉字、词典、古诗词、儿童英语。
- * 权限与首页学科权限对齐，避免无权限时静默失败难排查。
+ * 开放学习库接口。
+ * 列表类（图卡/词汇/词典/诗词/汉字）统一翻页；汉字笔顺详情单独按字读取。
  */
 @RestController
 @RequestMapping("/api/library")
@@ -30,28 +30,43 @@ public class LibraryController {
         return library.status();
     }
 
-    /** 查询单个汉字笔顺。 */
+    /**
+     * 汉字列表翻页，或按 value 取笔顺详情。
+     * value 有值时返回单个 JSON；否则返回 {items,page,...}。
+     */
     @GetMapping("/character")
-    public JsonNode character(@RequestHeader(value = "X-Session-Token", required = false) String token,
-                              @RequestParam String value) throws Exception {
+    public Object character(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                            @RequestParam(required = false) String value,
+                            @RequestParam(defaultValue = "") String query,
+                            @RequestParam(defaultValue = "1") int page,
+                            @RequestParam(defaultValue = "48") int size) throws Exception {
         auth.requirePermission(token, "CHINESE");
-        return library.character(value);
+        if (value != null && !value.trim().isEmpty()) {
+            return library.character(value.trim());
+        }
+        return library.characterPage(query, page, size);
     }
 
-    /** 查询英汉词典词条。 */
+    /** 英汉词典翻页（字母标签或关键词）。 */
     @GetMapping("/dictionary")
-    public List<JsonNode> dictionary(@RequestHeader(value = "X-Session-Token", required = false) String token,
-                                     @RequestParam String query) throws Exception {
+    public Map<String, Object> dictionary(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                                          @RequestParam(defaultValue = "") String query,
+                                          @RequestParam(defaultValue = "") String tag,
+                                          @RequestParam(defaultValue = "1") int page,
+                                          @RequestParam(defaultValue = "30") int size) throws Exception {
         auth.requirePermission(token, "ENGLISH");
-        return library.dictionary(query);
+        return library.dictionaryPage(query, tag, page, size);
     }
 
-    /** 查询古诗词（本地索引）。 */
+    /** 古诗词翻页（默认精选，可按作者标签或搜索）。 */
     @GetMapping("/poetry")
-    public List<JsonNode> poetry(@RequestHeader(value = "X-Session-Token", required = false) String token,
-                                 @RequestParam(defaultValue = "") String query) throws Exception {
+    public Map<String, Object> poetry(@RequestHeader(value = "X-Session-Token", required = false) String token,
+                                      @RequestParam(defaultValue = "") String query,
+                                      @RequestParam(defaultValue = "") String tag,
+                                      @RequestParam(defaultValue = "1") int page,
+                                      @RequestParam(defaultValue = "20") int size) throws Exception {
         auth.requirePermission(token, "CHINESE");
-        return library.poetry(query);
+        return library.poetryPage(query, tag, page, size);
     }
 
     /** 查询教材目录（仅链接，不下载 PDF）。 */
@@ -71,7 +86,7 @@ public class LibraryController {
         return library.textbooksTree(prefix, query);
     }
 
-    /** 儿童英语图卡（图片+音频，支持标签与翻页）。 */
+    /** 儿童英语图卡翻页。 */
     @GetMapping("/english")
     public Map<String, Object> english(@RequestHeader(value = "X-Session-Token", required = false) String token,
                                        @RequestParam(defaultValue = "") String query,
@@ -82,7 +97,7 @@ public class LibraryController {
         return library.englishKidsPage(query, tag, page, size);
     }
 
-    /** 常用英语词汇（约 5000，美音，多标签翻页）。 */
+    /** 常用英语词汇翻页。 */
     @GetMapping("/vocab")
     public Map<String, Object> vocab(@RequestHeader(value = "X-Session-Token", required = false) String token,
                                      @RequestParam(defaultValue = "") String query,
