@@ -10,13 +10,19 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class StudentService {
+    private static final Logger log = LoggerFactory.getLogger(StudentService.class);
     public static final String DEFAULT_PASSWORD = "123456";
+    public static final String ARCHIVE_ID_PATTERN = "[a-f0-9]{20}";
     public static final List<String> DEFAULT_PERMISSIONS = Arrays.asList(
             "CHINESE", "MATH", "PRIMARY", "RESOURCES", "MISTAKES", "RECORDS", "STATS", "PRINT");
     public static final List<String> ALL_PERMISSIONS = Arrays.asList(
@@ -28,13 +34,17 @@ public class StudentService {
 
     public StudentService(JsonFileStore store) { this.store = store; }
 
+    public static boolean isValidArchiveId(String id) {
+        return id != null && id.matches(ARCHIVE_ID_PATTERN);
+    }
+
     @PostConstruct
     public void init() throws Exception {
+        migrateExisting();
         Student admin = findByUsername("admin");
         if (admin == null) {
-            admin = create("admin", "管理员", DEFAULT_PASSWORD, "ADMIN", ALL_PERMISSIONS);
+            create("admin", "管理员", DEFAULT_PASSWORD, "ADMIN", ALL_PERMISSIONS);
         }
-        migrateExisting();
     }
 
     public synchronized Student create(String username, String name, String password, String role,
@@ -145,14 +155,58 @@ public class StudentService {
         return value.toString();
     }
     private void migrateExisting() throws Exception {
-        for (Student student : list()) {
+        List<JsonFileStore.Entry<Student>> entries = store.readFolderEntries("students", Student.class);
+        Set<String> usedIds = new HashSet<>();
+        for (JsonFileStore.Entry<Student> entry : entries) {
+            if (isValidArchiveId(entry.value.id)) usedIds.add(entry.value.id);
+            else if (isValidArchiveId(entry.key)) usedIds.add(entry.key);
+        }
+        for (JsonFileStore.Entry<Student> entry : entries) {
+            Student student = entry.value;
+            String oldKey = entry.key;
             boolean changed = false;
-            if (student.username == null) { student.username = student.name == null ? student.id : normalizeUsername(student.name); changed = true; }
+            if (student.username == null || student.username.trim().isEmpty()) {
+                String fallback = student.name == null || student.name.trim().isEmpty() ? oldKey : student.name;
+                try { student.username = normalizeUsername(fallback); }
+                catch (IllegalArgumentException ignored) { student.username = ("user" + Integer.toHexString(fallback.hashCode())).replace("-", ""); }
+                changed = true;
+            }
             if (student.passwordHash == null) { student.passwordHash = encoder.encode(DEFAULT_PASSWORD); changed = true; }
             if (student.passwordChangedAt == null && !student.mustChangePassword) { student.mustChangePassword = true; changed = true; }
             if (student.role == null) { student.role = "USER"; changed = true; }
             if (student.permissions == null || student.permissions.isEmpty()) { student.permissions = new ArrayList<>(DEFAULT_PERMISSIONS); changed = true; }
-            if (changed) store.write(store.path("students", student.id), student);
+
+            String targetId = resolveArchiveId(student, oldKey, usedIds);
+            if (!targetId.equals(student.id) || !targetId.equals(oldKey)) {
+                log.warn("修复无效学习档案: username={}, oldKey={}, oldId={}, newId={}", student.username, oldKey, student.id, targetId);
+                moveLearningData(oldKey, targetId);
+                if (student.id != null && !student.id.equals(oldKey) && !student.id.equals(targetId)) moveLearningData(student.id, targetId);
+                student.id = targetId;
+                store.writeDocument("students", targetId, student);
+                if (!oldKey.equals(targetId)) store.deleteDocument("students", oldKey);
+                usedIds.add(targetId);
+                changed = false;
+            } else if (changed) {
+                store.writeDocument("students", targetId, student);
+            }
         }
+    }
+
+    private String resolveArchiveId(Student student, String oldKey, Set<String> usedIds) throws Exception {
+        if (isValidArchiveId(student.id)) return student.id;
+        if (isValidArchiveId(oldKey)) return oldKey;
+        String preferred = idFor(student.username == null ? "user" : student.username);
+        if (!usedIds.contains(preferred) || preferred.equals(oldKey) || preferred.equals(student.id)) return preferred;
+        for (int i = 0; i < 16; i++) {
+            String candidate = idFor(student.username + "#" + i);
+            if (!usedIds.contains(candidate)) return candidate;
+        }
+        return idFor(student.username + "#" + System.nanoTime());
+    }
+
+    private void moveLearningData(String fromKey, String toKey) throws Exception {
+        if (fromKey == null || toKey == null || fromKey.equals(toKey)) return;
+        store.moveDocument("records", fromKey, toKey);
+        store.moveDocument("mistakes", fromKey, toKey);
     }
 }

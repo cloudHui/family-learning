@@ -18,7 +18,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,13 +78,22 @@ public class JsonFileStore {
 
     public synchronized <T> List<T> readFolder(String folder, Class<T> type) throws IOException {
         List<T> result = new ArrayList<>();
+        for (Entry<T> entry : readFolderEntries(folder, type)) result.add(entry.value);
+        return result;
+    }
+
+    public synchronized <T> List<Entry<T>> readFolderEntries(String folder, Class<T> type) throws IOException {
+        List<Entry<T>> result = new ArrayList<>();
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
-                "SELECT payload FROM documents WHERE folder=? ORDER BY item_key")) {
+                "SELECT item_key, payload FROM documents WHERE folder=? ORDER BY item_key")) {
             statement.setString(1, folder);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    try { result.add(mapper.readValue(rows.getString(1), type)); }
-                    catch (IOException invalidDocument) { log.error("跳过损坏的 SQLite 数据文档，目录={}", folder, invalidDocument); }
+                    try {
+                        result.add(new Entry<>(rows.getString(1), mapper.readValue(rows.getString(2), type)));
+                    } catch (IOException invalidDocument) {
+                        log.error("跳过损坏的 SQLite 数据文档，目录={} key={}", folder, rows.getString(1), invalidDocument);
+                    }
                 }
             }
             return result;
@@ -94,15 +102,58 @@ public class JsonFileStore {
 
     public synchronized void delete(Path path) throws IOException {
         String[] key = key(path);
+        deleteDocument(key[0], key[1]);
+    }
+
+    public synchronized void deleteDocument(String folder, String itemKey) throws IOException {
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
                 "DELETE FROM documents WHERE folder=? AND item_key=?")) {
-            statement.setString(1, key[0]); statement.setString(2, key[1]); statement.executeUpdate();
-        } catch (SQLException exception) { throw new IOException("SQLite 删除失败: " + path, exception); }
+            statement.setString(1, folder); statement.setString(2, itemKey); statement.executeUpdate();
+        } catch (SQLException exception) { throw new IOException("SQLite 删除失败: " + folder + "/" + itemKey, exception); }
+    }
+
+    public synchronized void writeDocument(String folder, String itemKey, Object value) throws IOException {
+        String payload = mapper.writeValueAsString(value);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO documents(folder,item_key,payload,updated_at) VALUES(?,?,?,datetime('now')) " +
+                        "ON CONFLICT(folder,item_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at")) {
+            statement.setString(1, folder); statement.setString(2, itemKey); statement.setString(3, payload); statement.executeUpdate();
+        } catch (SQLException exception) { throw new IOException("SQLite 写入失败: " + folder + "/" + itemKey, exception); }
+    }
+
+    public synchronized String findDocument(String folder, String itemKey) throws IOException {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
+                "SELECT payload FROM documents WHERE folder=? AND item_key=?")) {
+            statement.setString(1, folder); statement.setString(2, itemKey);
+            try (ResultSet rows = statement.executeQuery()) { return rows.next() ? rows.getString(1) : null; }
+        } catch (SQLException exception) { throw new IOException("SQLite 查询失败: " + folder + "/" + itemKey, exception); }
+    }
+
+    public synchronized void moveDocument(String folder, String fromKey, String toKey) throws IOException {
+        if (fromKey == null || toKey == null || fromKey.equals(toKey)) return;
+        String payload = findDocument(folder, fromKey);
+        if (payload == null) return;
+        String existing = findDocument(folder, toKey);
+        if (existing == null) {
+            try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE documents SET item_key=? WHERE folder=? AND item_key=?")) {
+                statement.setString(1, toKey); statement.setString(2, folder); statement.setString(3, fromKey); statement.executeUpdate();
+            } catch (SQLException exception) { throw new IOException("SQLite 重命名失败: " + folder + "/" + fromKey, exception); }
+            return;
+        }
+        // Target exists: keep target, drop the source key after optional merge by caller.
+        deleteDocument(folder, fromKey);
     }
 
     public synchronized boolean exists(Path path) throws IOException { return find(path) != null; }
     public Path root() { return root; }
     public Path database() { return database; }
+
+    public static final class Entry<T> {
+        public final String key;
+        public final T value;
+        public Entry(String key, T value) { this.key = key; this.value = value; }
+    }
 
     private String find(Path path) throws IOException {
         String[] key = key(path);

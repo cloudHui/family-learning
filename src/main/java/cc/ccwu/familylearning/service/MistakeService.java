@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -94,7 +95,7 @@ public class MistakeService {
     }
 
     private List<Mistake> all(String studentId) throws Exception {
-        validateId(studentId);
+        if (!StudentService.isValidArchiveId(studentId)) return new ArrayList<>();
         return store.readList(store.path("mistakes", studentId), new TypeReference<List<Mistake>>() {});
     }
 
@@ -103,7 +104,7 @@ public class MistakeService {
     }
     private String safe(String value) { return value == null ? "" : value; }
     private void validateId(String id) {
-        if (id == null || !id.matches("[a-f0-9]{20}")) throw new IllegalArgumentException("无效的学习档案");
+        if (!StudentService.isValidArchiveId(id)) throw new IllegalArgumentException("无效的学习档案");
     }
     private void validate(Mistake mistake) {
         if (mistake.subject == null || mistake.subject.trim().isEmpty()) throw new IllegalArgumentException("错题科目不能为空");

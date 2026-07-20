@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,7 +28,7 @@ public class RecordService {
     }
 
     public List<LearningRecord> list(String studentId) throws Exception {
-        validateId(studentId);
+        if (!StudentService.isValidArchiveId(studentId)) return new ArrayList<>();
         return store.readList(store.path("records", studentId), new TypeReference<List<LearningRecord>>() {});
     }
 
@@ -70,7 +71,7 @@ public class RecordService {
     }
 
     private void validateId(String id) {
-        if (id == null || !id.matches("[a-f0-9]{20}")) throw new IllegalArgumentException("无效的学习档案");
+        if (!StudentService.isValidArchiveId(id)) throw new IllegalArgumentException("无效的学习档案");
     }
 
     private void validate(LearningRecord record) {
