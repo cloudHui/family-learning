@@ -29,7 +29,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> serverError(Exception exception) {
         usage.backendError();
-        log.error("Unhandled API error", exception);
+        log.error("接口异常，可能导致后台操作失败", exception);
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "系统暂时开小差了，请稍后再试");
     }
 

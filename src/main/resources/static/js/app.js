@@ -70,7 +70,7 @@ createApp({
     deviceType(){const ua=navigator.userAgent;return /iPad|Tablet/i.test(ua)?'平板':/Mobile|Android|iPhone/i.test(ua)?'手机':'电脑';},
     pageName(){return {home:'首页',chinese:'语文区',math:'数学区',mistakes:'错题库',records:'学习记录',resources:'资源中心',stats:'学习统计',print:'题目打印',stages:'小学阶段',subject:this.subjectName+'区'}[this.view]||this.view;},
     hasPerm(permission){return this.student&&('ADMIN'===this.student.role||(this.student.permissions||[]).includes(permission));},
-    openAdmin(){window.location.href='admin.html';},
+    openAdmin(){if(this.student&&this.student.mustChangePassword){this.showToast('请先修改初始密码，再进入管理后台');return;}window.location.href='admin.html';},
     async changePassword(){if(this.passwordForm.newPassword!==this.passwordForm.confirmPassword){this.showToast('两次输入的新密码不一致');return;}try{await this.api('auth/password',{method:'POST',body:JSON.stringify(this.passwordForm)});this.student.mustChangePassword=false;this.showPassword=false;this.passwordForm={oldPassword:'',newPassword:'',confirmPassword:''};await this.loadDashboard();this.showToast('密码已修改');}catch(error){this.showToast(error.message);}},
     async loadDashboard(){try{this.statsData=await this.api('stats');this.dashboard=this.statsData.today||{};}catch(error){this.dashboard={};if(this.hasPerm('STATS'))this.showToast(error.message);}},
     goHome(){this.view='home';this.mathQuestions=[];this.dictationWord=null;this.loadDashboard();window.scrollTo(0,0);this.sendHeartbeat();},

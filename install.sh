@@ -7,6 +7,7 @@ SOURCE_DIR=$APP_DIR/source
 DATA_DIR=/var/lib/family-learning
 RESOURCE_DIR=$DATA_DIR/resources
 DATASET_DIR=$DATA_DIR/datasets
+LOG_DIR=/var/log/family-learning
 CONFIG_DIR=/etc/family-learning
 ENV_FILE=$CONFIG_DIR/family-learning.env
 SERVICE=family-learning.service
@@ -82,7 +83,7 @@ load_or_prompt_config() {
 }
 
 write_env() {
-  install -d -m 750 "$CONFIG_DIR" "$DATA_DIR" "$RESOURCE_DIR" "$DATASET_DIR"
+  install -d -m 750 "$CONFIG_DIR" "$DATA_DIR" "$RESOURCE_DIR" "$DATASET_DIR" /var/log/family-learning
   cat >"$ENV_FILE" <<EOF
 APP_ADDRESS=127.0.0.1
 APP_PORT=8088
@@ -90,6 +91,7 @@ ACCESS_CODE=$ACCESS_CODE
 DATA_DIR=$DATA_DIR
 RESOURCE_DIR=$RESOURCE_DIR
 DATASET_DIR=$DATASET_DIR
+LOG_DIR=$LOG_DIR
 TOMCAT_MAX_THREADS=40
 REPORT_ZONE=Asia/Shanghai
 REPORT_CRON='0 55 23 * * *'
@@ -120,6 +122,11 @@ fetch_source() {
 build_jar() {
   say "运行测试并构建 JAR"
   (cd "$SOURCE_DIR" && MAVEN_OPTS='-Xms64m -Xmx384m' mvn --batch-mode test package)
+}
+
+migrate_json() {
+  say "迁移旧 JSON 数据到 SQLite（失败不修改原 JSON）"
+  (cd "$SOURCE_DIR" && DATA_DIR="$DATA_DIR" ./scripts/migrate-json.sh)
 }
 
 install_datasets() {
@@ -162,6 +169,7 @@ install_service() {
   fi
   install_datasets
   chown -R family-learning:family-learning "$DATA_DIR"
+  chown family-learning:family-learning "$LOG_DIR"
   if [ -f "$APP_DIR/family-learning.jar" ]; then
     cp -f "$APP_DIR/family-learning.jar" "$APP_DIR/family-learning.jar.previous"
   fi
@@ -291,7 +299,7 @@ uninstall_app() {
 
 case "$ACTION" in
   install)
-    preflight; install_packages; load_or_prompt_config; fetch_source; build_jar; write_env
+    preflight; install_packages; load_or_prompt_config; fetch_source; build_jar; write_env; migrate_json
     install_service; write_nginx_http; enable_https; configure_firewall
     health_check || { rollback; die "启动失败，请运行 journalctl -u $SERVICE"; }
     scheme=http; [ "${HTTPS_ACTIVE:-no}" = yes ] && scheme=https
@@ -300,7 +308,7 @@ case "$ACTION" in
     say "初始管理员：admin / 123456，请登录后立即修改密码" ;;
   update)
     [ -f "$ENV_FILE" ] || die "尚未安装"; install_packages; load_or_prompt_config
-    fetch_source; build_jar; install_service
+    fetch_source; build_jar; write_env; migrate_json; install_service
     health_check || { rollback; die "更新失败，已尝试回滚"; }
     say "更新完成" ;;
   uninstall) uninstall_app ;;

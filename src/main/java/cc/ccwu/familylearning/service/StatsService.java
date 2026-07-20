@@ -5,6 +5,8 @@ import cc.ccwu.familylearning.model.LearningRecord;
 import cc.ccwu.familylearning.model.Mistake;
 import cc.ccwu.familylearning.model.Student;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.Set;
 
 @Service
 public class StatsService {
+    private static final Logger log = LoggerFactory.getLogger(StatsService.class);
     private final RecordService records;
     private final MistakeService mistakes;
     private final StudentService students;
@@ -115,8 +118,12 @@ public class StatsService {
         result.put("frontendErrors", today.frontendErrors); result.put("backendErrors", today.backendErrors);
         int completed = 0, correct = 0, newMistakes = 0; List<Mistake> combined = new ArrayList<>();
         for (Student user : users) {
-            for (LearningRecord record : records.list(user.id)) if (record.createdAt != null && LocalDate.now().equals(record.createdAt.toLocalDate())) { completed += record.total; correct += record.correct; }
-            for (Mistake item : mistakes.list(user.id, null, null)) { combined.add(item); if (item.firstWrongAt != null && LocalDate.now().equals(item.firstWrongAt.toLocalDate())) newMistakes++; }
+            try {
+                for (LearningRecord record : records.list(user.id)) if (record.createdAt != null && LocalDate.now().equals(record.createdAt.toLocalDate())) { completed += record.total; correct += record.correct; }
+                for (Mistake item : mistakes.list(user.id, null, null)) { combined.add(item); if (item.firstWrongAt != null && LocalDate.now().equals(item.firstWrongAt.toLocalDate())) newMistakes++; }
+            } catch (Exception exception) {
+                log.error("管理员统计跳过异常用户: {}", user.id, exception);
+            }
         }
         result.put("completed", completed); result.put("accuracy", percent(correct, completed)); result.put("newMistakes", newMistakes);
         result.put("frequentErrors", frequent(combined, null, 15)); result.put("onlineUsers", usage.onlineUsers()); return result;

@@ -22,7 +22,7 @@ public class WordService {
 
     @PostConstruct
     public synchronized void init() throws Exception {
-        if (!java.nio.file.Files.exists(store.path("content", "words"))) {
+        if (!store.exists(store.path("content", "words"))) {
             try (InputStream input = getClass().getResourceAsStream("/content/words.json")) {
                 if (input == null) throw new IllegalStateException("缺少字词数据");
                 store.write(store.path("content", "words"), mapper.readValue(input, new TypeReference<List<WordItem>>() {}));

@@ -19,7 +19,7 @@ public class ContentService {
 
     @PostConstruct
     public synchronized void init() throws Exception {
-        if (!java.nio.file.Files.exists(store.path("content", "word-problems"))) {
+        if (!store.exists(store.path("content", "word-problems"))) {
             List<WordProblemTemplate> defaults = new ArrayList<>();
             defaults.add(template("幼小衔接", "add", "小明有{a}个苹果，妈妈又给他{b}个，一共有多少个苹果？", 10));
             defaults.add(template("幼小衔接", "sub", "树上有{a}只小鸟，飞走了{b}只，还剩多少只？", 10));

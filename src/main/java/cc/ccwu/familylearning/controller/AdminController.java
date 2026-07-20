@@ -8,14 +8,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
+    private static final Logger log = LoggerFactory.getLogger(AdminController.class);
     private final AuthService auth;private final StudentService students;private final WordService words;private final ContentService content;
     private final RecordService records;private final MistakeService mistakes;private final StatsService stats;private final UsageService usage;private final DailyReportService reports;
     public AdminController(AuthService auth,StudentService students,WordService words,ContentService content,RecordService records,MistakeService mistakes,StatsService stats,UsageService usage,DailyReportService reports){this.auth=auth;this.students=students;this.words=words;this.content=content;this.records=records;this.mistakes=mistakes;this.stats=stats;this.usage=usage;this.reports=reports;}
-    private void admin(String token)throws Exception{auth.requireAdmin(token);}
+    private void admin(String token)throws Exception{Student operator=auth.requireAdmin(token);log.info("管理员进入后台接口: operator={}, tokenPresent={}",operator.username,token!=null);}
 
     @GetMapping("/users") public List<Map<String,Object>> users(@RequestHeader("X-Session-Token")String token)throws Exception{admin(token);return students.list().stream().map(students::view).collect(Collectors.toList());}
     @PostMapping("/users") public Map<String,Object> createUser(@RequestHeader("X-Session-Token")String token,@RequestBody UserRequest request)throws Exception{admin(token);return students.view(students.create(request.username,request.name,request.password==null?StudentService.DEFAULT_PASSWORD:request.password,request.role,request.permissions));}
