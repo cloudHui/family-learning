@@ -151,10 +151,21 @@ public class AuthService {
         Session session = sessions.remove(token);
         if (session == null) return;
         usage.logout(session.userId);
+        String shownIp = resolveLogIp(ip, session.lastIp);
         log.info("用户掉线 reason={}, username={}, name={}, userId={}, ip={}, device={}, lastActivityAt={}",
                 reason, session.username, session.name, session.userId,
-                ip == null || ip.isEmpty() ? session.lastIp : ip,
-                session.device, session.lastActivityAt);
+                shownIp, session.device, session.lastActivityAt);
+    }
+
+    /** 掉线日志优先用当前请求 IP；无效或本机回环时回退会话缓存。 */
+    private static String resolveLogIp(String current, String cached) {
+        String now = ClientIp.normalize(current);
+        String prev = ClientIp.normalize(cached);
+        if (ClientIp.isValidIp(now) && !ClientIp.isLoopback(now)) return now;
+        if (ClientIp.isValidIp(prev) && !ClientIp.isLoopback(prev)) return prev;
+        if (ClientIp.isValidIp(now)) return now;
+        if (ClientIp.isValidIp(prev)) return prev;
+        return "-";
     }
 
     private void requireChangedPassword(Student user) {
